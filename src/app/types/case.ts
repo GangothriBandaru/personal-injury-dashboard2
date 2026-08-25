@@ -70,7 +70,11 @@ export function classifyDocuments(docs: CaseDocument[]): ClassificationCategory[
 
   for (const doc of docs) {
     const n = doc.name.toLowerCase();
-    if (/(mri|ct_|xray|x-ray|er_|emergency|hospital|medical|therapy|treatment|surgery|medication|discharge|physical|clinical|admission|radiology|imaging|records|bills|invoice|prescription)/.test(n)) {
+    // `er_` is anchored to a name segment so it matches ER_Bills but not
+    // "lett(er_)draft" / "offic(er_)narrative"; bare `records` is intentionally
+    // absent so "Carrier_Records" is not read as a medical file — the specific
+    // medical keywords already cover the real records.
+    if (/(mri|ct_|xray|x-ray|(?:^|[_\-\s])er_|emergency|hospital|medical|therapy|treatment|surgery|medication|discharge|physical|clinical|admission|radiology|imaging|bills|invoice|prescription)/.test(n)) {
       buckets["Medical Records"].push(doc);
     } else if (/(police|accident|incident|witness|citation|patrol|officer|crash|report)/.test(n)) {
       buckets["Police Reports"].push(doc);

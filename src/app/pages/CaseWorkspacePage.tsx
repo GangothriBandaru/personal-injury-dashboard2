@@ -5,7 +5,11 @@ import {
   WorkspaceModel,
   OverviewTab, MedicalTimelineTab, EconomicDamagesTab, NonEconomicDamagesTab,
   LiabilityAnalysisTab, EvidenceRepositoryTab, DemandPackageTab, NegotiationTab,
+  stageEvidence, stageDocInsights, STAGE_LABELS, EMPTY_USER_CHRONOLOGY,
+  type StageId, type UserChronology,
 } from "../workspace/WorkspaceTabs";
+import { StageEvidenceSection } from "../workspace/StageEvidence";
+import { DocumentWorkspaceModal } from "../components/DocumentWorkspace";
 import { DemandSpacePage } from "./DemandSpacePage";
 import { DemandPackageEditorPage } from "./DemandPackageEditorPage";
 
@@ -28,6 +32,11 @@ const TABS = [
   { id: "negotiation", label: "Negotiations" },
 ];
 
+// The eight stages that close with an Evidence section (Demand Space is not a stage).
+const STAGE_IDS = TABS.map((t) => t.id) as StageId[];
+// Stages laid out at max-w-4xl — the Evidence section matches their width.
+const NARROW_STAGES: StageId[] = ["evidence", "negotiation"];
+
 // Canonical valuation baseline (kept consistent with the Valuation stage).
 const BASE_ECONOMIC = 161450;
 const MULTIPLIER = 9;
@@ -46,6 +55,25 @@ const GENERATE_STEPS = [
 
 export function CaseWorkspacePage({ caseData, analysisFindings = [], documents = [], onBackToIntake, onNavigateToValuation }: CaseWorkspacePageProps) {
   const [activeTab, setActiveTab] = useState("overview");
+
+  // Chronology entries the attorney added by hand. Held here so they survive
+  // tab switches and so the Chronology stage's Evidence section can see the
+  // documents attached to them.
+  const [userChronology, setUserChronology] = useState<UserChronology>(EMPTY_USER_CHRONOLOGY);
+
+  // ── Stage Evidence — the documents supporting whichever stage is open ──
+  const stageId = STAGE_IDS.includes(activeTab as StageId) ? (activeTab as StageId) : null;
+  const evidenceDocs = stageId
+    ? stageEvidence(stageId, documents, { findings: analysisFindings, userChronology: [...userChronology.medical, ...userChronology.event] })
+    : [];
+  // Preview and Insights open the existing Document Workspace; the stage only
+  // changes how the AI Insights panel frames the document.
+  const [evidenceDoc, setEvidenceDoc] = useState<CaseDocument | null>(null);
+  const [evidenceView, setEvidenceView] = useState<"preview" | "insights">("preview");
+  const openEvidenceDoc = (doc: CaseDocument, view: "preview" | "insights") => {
+    setEvidenceDoc(doc);
+    setEvidenceView(view);
+  };
 
   // ── Generate Demand → Demand Letter draft → Demand Space workflow ──
   // A full package is never created up front — only the Demand Letter is
@@ -136,7 +164,15 @@ export function CaseWorkspacePage({ caseData, analysisFindings = [], documents =
 
   const renderTab = () => {
     switch (activeTab) {
-      case "medical": return <MedicalTimelineTab {...tabProps} />;
+      case "medical": return (
+        <MedicalTimelineTab
+          {...tabProps}
+          userChronology={userChronology}
+          onAddChronology={(kind, ev) =>
+            setUserChronology((prev) => ({ ...prev, [kind]: [...prev[kind], ev] }))
+          }
+        />
+      );
       case "economic": return <EconomicDamagesTab {...tabProps} />;
       case "noneconomic": return <NonEconomicDamagesTab {...tabProps} />;
       case "liability": return <LiabilityAnalysisTab {...tabProps} />;
@@ -220,7 +256,31 @@ export function CaseWorkspacePage({ caseData, analysisFindings = [], documents =
       {/* ── Scrollable content ── */}
       <div className="max-w-[1400px] mx-auto px-8 py-10">
         {renderTab()}
+
+        {/* Every stage closes with the evidence supporting THAT stage */}
+        {stageId && (
+          <StageEvidenceSection
+            key={stageId}
+            stageLabel={STAGE_LABELS[stageId]}
+            docs={evidenceDocs}
+            narrow={NARROW_STAGES.includes(stageId)}
+            onPreview={(d) => openEvidenceDoc(d, "preview")}
+            onInsights={(d) => openEvidenceDoc(d, "insights")}
+            onDownload={() => {}}
+          />
+        )}
       </div>
+
+      {/* Stage evidence opens the existing Document Workspace, with AI Insights
+          framed by the stage it was opened from */}
+      <DocumentWorkspaceModal
+        docs={evidenceDoc ? [evidenceDoc] : null}
+        initialView={evidenceView}
+        insights={evidenceDoc && stageId ? stageDocInsights(stageId, evidenceDoc) : undefined}
+        noteContext={stageId ? { contextType: "Stage Evidence", reference: STAGE_LABELS[stageId] } : undefined}
+        onClose={() => setEvidenceDoc(null)}
+        onDownload={() => {}}
+      />
 
       {/* ── Generate Demand: centered popup with the generating / success sequence ── */}
       {genPhase !== "idle" && (

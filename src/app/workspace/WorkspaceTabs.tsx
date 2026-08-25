@@ -503,7 +503,7 @@ export function OverviewTab({ model, documents, goTo }: TabProps) {
 
 // ── Tab 2 — Chronology ────────────────────────────────────────────────────────
 
-interface ChronEvent {
+export interface ChronEvent {
   id?: string;
   date: string;
   time?: string;
@@ -1007,7 +1007,15 @@ function EvidenceChips({ evidence, onOpen, align }: { evidence: string[]; onOpen
   );
 }
 
-export function MedicalTimelineTab({ documents, goTo }: TabProps) {
+// Manually added chronology lives above this component so it survives tab
+// switches and so the Chronology stage's Evidence section can see the documents
+// the attorney attached to those events.
+export interface UserChronology { medical: ChronEvent[]; event: ChronEvent[] }
+export const EMPTY_USER_CHRONOLOGY: UserChronology = { medical: [], event: [] };
+
+export function MedicalTimelineTab({
+  documents, goTo, userChronology = EMPTY_USER_CHRONOLOGY, onAddChronology,
+}: TabProps & { userChronology?: UserChronology; onAddChronology?: (kind: "medical" | "event", ev: ChronEvent) => void }) {
   const [subTab, setSubTab] = useState<"medical" | "event">("medical");
   // Inline accordion: only one panel open across all medical cards at a time.
   const [openPanel, setOpenPanel] = useState<{ index: number; mode: PanelMode } | null>(null);
@@ -1035,8 +1043,8 @@ export function MedicalTimelineTab({ documents, goTo }: TabProps) {
 
   // ── Manually added chronology (Add Chronology drawer) ──
   const [addOpen, setAddOpen] = useState(false);
-  const [userMedical, setUserMedical] = useState<ChronEvent[]>([]);
-  const [userEvent, setUserEvent] = useState<ChronEvent[]>([]);
+  const userMedical = userChronology.medical;
+  const userEvent = userChronology.event;
   const [toast, setToast] = useState<string | null>(null);
 
   // Full timelines — generated events with the attorney's entries slotted in by date.
@@ -1044,9 +1052,7 @@ export function MedicalTimelineTab({ documents, goTo }: TabProps) {
   const eventAll = mergeChronologically(EVENT_CHRONOLOGY, userEvent);
 
   const addChronology = (c: CreatedChronology) => {
-    const ev = toChronEvent(c);
-    if (c.kind === "medical") setUserMedical((prev) => [...prev, ev]);
-    else setUserEvent((prev) => [...prev, ev]);
+    onAddChronology?.(c.kind, toChronEvent(c));
     setAddOpen(false);
     setOpenPanel(null); // indices shift once the new card is slotted in
     setToast(c.kind === "medical" ? "Medical chronology added successfully." : "Event chronology added successfully.");
@@ -5090,4 +5096,198 @@ export function NegotiationTab({ model }: TabProps) {
       </div>
     </div>
   );
+}
+
+// ── Stage Evidence — which documents support which stage ──────────────────────
+// The case has ONE document repository. A stage does not own copies of files;
+// it points at the documents its own content already cites, plus anything in
+// the repository matching that stage's subject matter. The same MRI can back
+// Chronology, Damages, and Intelligence while remaining a single document.
+
+export type StageId =
+  | "overview" | "medical" | "economic" | "noneconomic"
+  | "liability" | "evidence" | "demand" | "negotiation";
+
+// Human label per stage — matches the workspace tab labels.
+export const STAGE_LABELS: Record<StageId, string> = {
+  overview: "Case Overview",
+  medical: "Chronology",
+  economic: "Damages Analysis",
+  noneconomic: "Negligence",
+  liability: "Violations",
+  evidence: "Case Journey",
+  demand: "Intelligence",
+  negotiation: "Negotiations",
+};
+
+// Repository documents a stage should surface, by subject matter. Applied to the
+// uploaded case file so newly added documents reach the right stages on their own.
+const STAGE_REPO_MATCH: Record<StageId, RegExp> = {
+  // Core case file: primary medical, the incident record, and coverage.
+  overview: /(mri|hospital_medical|police|witness|insurance|policy|retainer|intake)/,
+  // Treatment and incident timeline.
+  medical: /(mri|er_|hospital|medical|therapy|treatment|imaging|discharge|admission|police|dispatch|emergency|claim)/,
+  // Economic and medical damages.
+  economic: /(mri|er_|bill|invoice|hospital|medical|therapy|treatment|wage|payroll|income|receipt|mileage|life_care|prognosis|impairment)/,
+  // Liability and breach of duty.
+  noneconomic: /(police|witness|accident|incident|crash|camera|dashcam|vehicle|photo|scene|reconstruction|officer|driver|safety|ems|dispatch)/,
+  // Regulatory, citation, inspection, compliance.
+  liability: /(citation|violation|inspection|compliance|policy|log|fmcsa|carrier|safety|regulation|standard|permit|officer|police|scene|camera|dashcam|edr|skid|signal)/,
+  // Filings, claims, correspondence, case preparation.
+  evidence: /(claim|insurance|policy|demand|letter|correspondence|filing|court|motion|pleading|wage|medical_records)/,
+  // Everything the AI analysis reads from.
+  demand: /(mri|hospital|medical|police|witness|wage|insurance|policy|therapy|bill)/,
+  // Settlement value and negotiation leverage.
+  negotiation: /(demand|letter|settlement|offer|correspondence|insurance|policy|bill|wage|medical|mri)/,
+};
+
+// Filenames each stage already cites in its own content. Chronology is computed
+// at call time so it also picks up manually added events and their attachments.
+function stageCitations(stage: StageId, userChron: ChronEvent[]): string[] {
+  switch (stage) {
+    case "medical":
+      return [...MEDICAL_CHRONOLOGY, ...EVENT_CHRONOLOGY, ...userChron].flatMap((e) => e.evidence);
+    case "economic":
+      return [
+        ...ECONOMIC.flatMap((e) => e.docs),
+        ...DAMAGE_EVIDENCE.flatMap((d) => [d.primary, ...d.docs]),
+      ];
+    case "noneconomic":
+      return NEGLIGENCE_PILLARS.flatMap((p) => p.docs);
+    case "liability":
+      return VIOLATION_CARDS.flatMap((v) => v.evidence);
+    case "evidence":
+      // The procedural half of the case timeline: investigation, claim, prep, negotiation.
+      return EVENT_CHRONOLOGY
+        .filter((e) => /Insurance Claim|Case Preparation|Settlement Negotiation|Police Investigation/.test(e.title))
+        .flatMap((e) => e.evidence);
+    case "negotiation":
+      return EVENT_CHRONOLOGY
+        .filter((e) => /Settlement Negotiation|Insurance Claim/.test(e.title))
+        .flatMap((e) => e.evidence);
+    default:
+      return [];
+  }
+}
+
+// Resolve a stage to its supporting documents. Identity is the filename, so a
+// document cited by several stages stays one record throughout.
+export function stageEvidence(
+  stage: StageId,
+  documents: CaseDocument[],
+  opts: { findings?: AnalysisFinding[]; userChronology?: ChronEvent[] } = {},
+): CaseDocument[] {
+  const docForFile = buildDocResolver(documents);
+  const names: string[] = [];
+
+  // 1 — repository documents whose subject matter belongs to this stage
+  const rule = STAGE_REPO_MATCH[stage];
+  for (const d of documents) if (rule.test(d.name.toLowerCase())) names.push(d.name);
+
+  // 2 — documents this stage's own content cites
+  names.push(...stageCitations(stage, opts.userChronology ?? []));
+
+  // 3 — Intelligence additionally reads from every analysis finding
+  if (stage === "demand") {
+    for (const f of opts.findings ?? []) names.push(...f.sources, ...f.evidence.map((e) => e.file));
+  }
+
+  const seen = new Set<string>();
+  return names
+    .filter((n) => {
+      const key = n.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map(docForFile);
+}
+
+// ── Context-aware AI Insights ─────────────────────────────────────────────────
+// The same document means different things in different stages. Preview and
+// Insights open the existing Document Workspace unchanged; only the insight
+// content is re-framed for the stage the attorney opened it from.
+
+const STAGE_INSIGHT: Record<StageId, { lens: string; points: string[] }> = {
+  overview: {
+    lens: "how it frames the case as a whole",
+    points: [
+      "Establishes a core fact the rest of the case is built on.",
+      "Corroborated by the other documents in the case file.",
+      "No conflict with the recorded case summary.",
+    ],
+  },
+  medical: {
+    lens: "what it establishes chronologically",
+    points: [
+      "Fixes the date and sequence of a documented event.",
+      "Treatment findings fall inside the injury window.",
+      "Supports causation by tying the injury to the incident date.",
+    ],
+  },
+  economic: {
+    lens: "what it contributes to damages",
+    points: [
+      "Documents injury severity and its treatment impact.",
+      "Supports the functional impairment claimed in the damages model.",
+      "Carries future-care implications for the projected total.",
+    ],
+  },
+  noneconomic: {
+    lens: "what it proves about liability",
+    points: [
+      "Speaks directly to breach of the duty owed.",
+      "Records facts establishing negligence.",
+      "No contradiction or gap identified against the other evidence.",
+    ],
+  },
+  liability: {
+    lens: "which regulatory duty it engages",
+    points: [
+      "Ties the conduct to a specific statutory or regulatory standard.",
+      "Supports the cited violation with a contemporaneous record.",
+      "Usable as an exhibit for the compliance argument.",
+    ],
+  },
+  evidence: {
+    lens: "where it sits in the procedural history",
+    points: [
+      "Marks a step in the claim's procedural sequence.",
+      "Dated and attributable for the case chronology.",
+      "Retained in the file for the record.",
+    ],
+  },
+  demand: {
+    lens: "how it feeds the case analysis",
+    points: [
+      "Read by the AI analysis as a primary source.",
+      "Contributes to the confidence attached to the case assessment.",
+      "Consistent with the other sources behind the valuation.",
+    ],
+  },
+  negotiation: {
+    lens: "what it is worth at the table",
+    points: [
+      "Supports the asserted settlement position.",
+      "Backs the damages figure with documented value.",
+      "Adds leverage against a below-range carrier response.",
+    ],
+  },
+};
+
+// AI Insights payload for a document, framed by the stage it was opened from.
+// Shape matches what the Document Workspace already renders.
+export function stageDocInsights(stage: StageId, doc: CaseDocument) {
+  const s = STAGE_INSIGHT[stage];
+  return {
+    summary: `Reviewed for ${STAGE_LABELS[stage]} — ${s.lens}. ${doc.name} is read here as support for this stage's conclusions.`,
+    keyPoints: s.points,
+    entities: [
+      { label: "Stage", value: STAGE_LABELS[stage] },
+      { label: "Source", value: doc.source ?? "Attorney Office" },
+      { label: "Date", value: doc.date ?? "—" },
+    ],
+    supportingDocs: [doc.name],
+    confidence: { level: "High", score: 92 },
+  };
 }
