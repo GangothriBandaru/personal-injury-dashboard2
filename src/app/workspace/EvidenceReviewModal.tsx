@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import {
   X, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, RotateCw, ShieldCheck, Send,
-  Download, Sparkles, Lightbulb, FileText, Stethoscope, AlertTriangle, MessageSquare, CheckCircle,
+  Download, Sparkles, Lightbulb, FileText, Stethoscope, AlertTriangle, MessageSquare, CheckCircle, UserPlus,
 } from "lucide-react";
 
 export interface EvidenceDoc {
@@ -24,6 +24,12 @@ interface EvidenceReviewModalProps {
   actions?: KeyAction[];  // key actions within the event
   docs: EvidenceDoc[];
   initialAI?: "actions" | "insights" | "chat" | PanelMode | null; // open directly into a detail view
+  // Origin of the event — omitted (or "system") for chronology generated from
+  // verified evidence, "user" for an entry the attorney created by hand.
+  source?: "system" | "user";
+  addedBy?: string;
+  addedAt?: string;
+  details?: { label: string; value: string }[]; // extra fields captured on creation
   onClose: () => void;
 }
 
@@ -244,7 +250,7 @@ function ChatView() {
 
 // ── Modal ─────────────────────────────────────────────────────────────────────
 
-export function EvidenceReviewModal({ open, title, date, time, insight, description, actions, docs, initialAI, onClose }: EvidenceReviewModalProps) {
+export function EvidenceReviewModal({ open, title, date, time, insight, description, actions, docs, initialAI, source, addedBy, addedAt, details, onClose }: EvidenceReviewModalProps) {
   const [activeDoc, setActiveDoc] = useState(0);
   const [zoom, setZoom] = useState(100);
   const [rotation, setRotation] = useState(0);
@@ -366,10 +372,29 @@ export function EvidenceReviewModal({ open, title, date, time, insight, descript
                 <div>
                   <div className="flex items-center justify-between gap-2 mb-1.5">
                     {(date || time) && <div className="mono-ref">{date}{time ? ` • ${time}` : ""}</div>}
-                    <span className="pill pill-complete shrink-0"><ShieldCheck className="w-3.5 h-3.5" strokeWidth={1.75} /> Verified</span>
+                    {source === "user" ? (
+                      <span className="pill pill-neutral shrink-0"><UserPlus className="w-3.5 h-3.5" strokeWidth={1.75} /> User Added</span>
+                    ) : (
+                      <span className="pill pill-complete shrink-0"><ShieldCheck className="w-3.5 h-3.5" strokeWidth={1.75} /> Verified</span>
+                    )}
                   </div>
                   <h3 className="card-title leading-snug">{title}</h3>
                   <p className="body-text leading-relaxed mt-2">{description}</p>
+
+                  {/* Fields captured when the entry was created — secondary to the event itself */}
+                  {details && details.length > 0 && (
+                    <div className="rounded-xl border border-line divide-y divide-line mt-3">
+                      {details.map((d) => (
+                        <div key={d.label} className="flex items-start justify-between gap-4 px-4 py-2.5">
+                          <span className="text-sm text-[#5B6B78] shrink-0">{d.label}</span>
+                          <span className="text-sm font-medium text-ink text-right">{d.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {source === "user" && addedBy && (
+                    <p className="text-[11px] text-[#8A98A3] mt-2.5">Added by {addedBy}{addedAt ? ` · ${addedAt}` : ""}</p>
+                  )}
                 </div>
 
                 {/* Section 2 — Supporting Evidence (switches the PDF) */}

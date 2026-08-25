@@ -6,11 +6,13 @@ import {
   Gavel, MessageSquare, SlidersHorizontal,
   HeartPulse, ClipboardList, Image as ImageIcon, Video, FileSignature, Quote,
   Pencil, RotateCcw, History, TrendingUp, TrendingDown, Info, Shield, Circle, Loader2, Bot, Send,
+  Plus, UserPlus,
 } from "lucide-react";
 import type { AnalysisFinding, CaseDocument } from "../types/case";
 import { classifyDocuments } from "../types/case";
 import { DocumentWorkspaceModal } from "../components/DocumentWorkspace";
 import { EvidenceReviewModal } from "./EvidenceReviewModal";
+import { AddChronologyDrawer, type CreatedChronology } from "./AddChronologyDrawer";
 import { InjuryIntelligenceSection } from "../components/InjuryIntelligenceSection";
 
 // ── Shared model & helpers ────────────────────────────────────────────────────
@@ -502,6 +504,7 @@ export function OverviewTab({ model, documents, goTo }: TabProps) {
 // ── Tab 2 — Chronology ────────────────────────────────────────────────────────
 
 interface ChronEvent {
+  id?: string;
   date: string;
   time?: string;
   title: string;
@@ -509,6 +512,14 @@ interface ChronEvent {
   insight: string;
   evidence: string[];
   actions?: { text: string; time?: string; description?: string; evidence?: string[] }[]; // key actions (Event Chronology milestones)
+  // ── Origin of the entry. Absent = system-generated from verified evidence.
+  // "user" = created by hand in the Add Chronology drawer. The origin never
+  // changes, even after AI tools are run on the event.
+  source?: "system" | "user";
+  category?: string;                              // set on user-added events; drives the event-type filter
+  addedBy?: string;
+  addedAt?: string;
+  details?: { label: string; value: string }[];   // provider / injury / severity / notes, shown on open
 }
 
 const MEDICAL_CHRONOLOGY: ChronEvent[] = [
@@ -625,6 +636,9 @@ const EVENT_CHRONOLOGY: ChronEvent[] = [
   },
 ];
 
+// The signed-in attorney — stamped on manually created chronology entries.
+const CURRENT_USER = "Jennifer Davis";
+
 // ── Chronology toolbar helpers ────────────────────────────────────────────────
 
 // Event categories, keyed by title, drive the tab-aware filter dropdown.
@@ -665,6 +679,52 @@ function parseChronStart(date: string): { month: number; day: number; year: numb
 const sameDay = (a: Date, b: Date) =>
   a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 const fmtShort = (d: Date) => `${MONTHS_ABBR[d.getMonth()]} ${d.getDate()}`;
+
+// "9:42 AM" → minutes past midnight; null when the event carries no time.
+function parseChronTime(time?: string): number | null {
+  const m = time?.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!m) return null;
+  const h = parseInt(m[1], 10) % 12;
+  return (m[3].toUpperCase() === "PM" ? h + 12 : h) * 60 + parseInt(m[2], 10);
+}
+
+// Merge manually added events into the generated timeline and keep the whole
+// list in date order — a new Feb 20 event lands between Feb 16 and Feb 23, not
+// at the bottom. Same-day entries keep their existing relative order unless
+// both carry a time, so the generated sequence is never reshuffled.
+function mergeChronologically(base: ChronEvent[], added: ChronEvent[]): ChronEvent[] {
+  return [...base, ...added]
+    .map((ev, i) => {
+      const p = parseChronStart(ev.date);
+      return { ev, i, day: p ? new Date(p.year, p.month, p.day).getTime() : 0, min: parseChronTime(ev.time) };
+    })
+    .sort((a, b) => {
+      if (a.day !== b.day) return a.day - b.day;
+      if (a.min !== null && b.min !== null && a.min !== b.min) return a.min - b.min;
+      return a.i - b.i;
+    })
+    .map((x) => x.ev);
+}
+
+// A manually created entry, as the drawer hands it back.
+function toChronEvent(c: CreatedChronology): ChronEvent {
+  return {
+    id: `user-${c.addedAt}-${c.title}`,
+    date: c.date,
+    time: c.time,
+    title: c.title,
+    description: c.description,
+    insight:
+      "Attorney-recorded event. It is part of the chronology and is supported by the documentation attached to it.",
+    evidence: c.evidence,
+    actions: c.actions && c.actions.length > 0 ? c.actions : undefined,
+    source: "user",
+    category: c.category,
+    addedBy: c.addedBy,
+    addedAt: c.addedAt,
+    details: c.details,
+  };
+}
 
 // Date-picker popup for the Chronology toolbar — pick a single date or a custom
 // range. Selection filters the chronology; nothing selected = show everything.
@@ -973,6 +1033,32 @@ export function MedicalTimelineTab({ documents, goTo }: TabProps) {
   const [rangeFrom, setRangeFrom] = useState<Date | null>(null);
   const [rangeTo, setRangeTo] = useState<Date | null>(null);
 
+  // ── Manually added chronology (Add Chronology drawer) ──
+  const [addOpen, setAddOpen] = useState(false);
+  const [userMedical, setUserMedical] = useState<ChronEvent[]>([]);
+  const [userEvent, setUserEvent] = useState<ChronEvent[]>([]);
+  const [toast, setToast] = useState<string | null>(null);
+
+  // Full timelines — generated events with the attorney's entries slotted in by date.
+  const medicalAll = mergeChronologically(MEDICAL_CHRONOLOGY, userMedical);
+  const eventAll = mergeChronologically(EVENT_CHRONOLOGY, userEvent);
+
+  const addChronology = (c: CreatedChronology) => {
+    const ev = toChronEvent(c);
+    if (c.kind === "medical") setUserMedical((prev) => [...prev, ev]);
+    else setUserEvent((prev) => [...prev, ev]);
+    setAddOpen(false);
+    setOpenPanel(null); // indices shift once the new card is slotted in
+    setToast(c.kind === "medical" ? "Medical chronology added successfully." : "Event chronology added successfully.");
+  };
+
+  // Auto-dismiss the confirmation toast.
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 3500);
+    return () => clearTimeout(t);
+  }, [toast]);
+
   const clearDates = () => { setSelDate(null); setRangeFrom(null); setRangeTo(null); };
   // Click handling inside the calendar grid: single sets the date; range fills
   // from → to, then starts over on the next click.
@@ -993,8 +1079,15 @@ export function MedicalTimelineTab({ documents, goTo }: TabProps) {
   };
 
   const categoryOf = (ev: ChronEvent) =>
-    (subTab === "medical" ? MEDICAL_CATEGORIES : EVENT_CATEGORIES)[ev.title] ?? "Other";
-  const filterOptions = subTab === "medical" ? MEDICAL_FILTERS : EVENT_FILTERS;
+    ev.category ?? (subTab === "medical" ? MEDICAL_CATEGORIES : EVENT_CATEGORIES)[ev.title] ?? "Other";
+  // Base options, plus any category a manually added event introduced.
+  const baseFilters = subTab === "medical" ? MEDICAL_FILTERS : EVENT_FILTERS;
+  const filterOptions = [
+    ...baseFilters,
+    ...Array.from(new Set((subTab === "medical" ? userMedical : userEvent).map(categoryOf))).filter(
+      (c) => !baseFilters.includes(c),
+    ),
+  ];
   const allLabel = subTab === "medical" ? "All Medical Events" : "All Case Events";
   const filterLabel = filter === "all" ? allLabel : filter;
 
@@ -1017,8 +1110,17 @@ export function MedicalTimelineTab({ documents, goTo }: TabProps) {
     : `${fmtShort(rangeFrom!)}${rangeTo ? ` – ${fmtShort(rangeTo)}` : ""}`;
 
   const docForFile = buildDocResolver(documents);
+  // Documents the attorney can attach — the case file, plus anything already
+  // cited by the generated chronology.
+  const attachableDocs = Array.from(
+    new Set([
+      ...documents.map((d) => d.name),
+      ...MEDICAL_CHRONOLOGY.flatMap((e) => e.evidence),
+      ...EVENT_CHRONOLOGY.flatMap((e) => e.evidence),
+    ]),
+  );
   const q = search.trim().toLowerCase();
-  const events = (subTab === "medical" ? MEDICAL_CHRONOLOGY : EVENT_CHRONOLOGY).filter(
+  const events = (subTab === "medical" ? medicalAll : eventAll).filter(
     (ev) =>
       (filter === "all" || categoryOf(ev) === filter) &&
       (q === "" || (ev.title + " " + ev.description).toLowerCase().includes(q)) &&
@@ -1048,8 +1150,8 @@ export function MedicalTimelineTab({ documents, goTo }: TabProps) {
         {/* Left — chronology tabs */}
         <div className="flex items-center gap-2">
           {([
-            { key: "medical", label: "Medical Chronology", count: MEDICAL_CHRONOLOGY.length },
-            { key: "event", label: "Event Chronology", count: EVENT_CHRONOLOGY.length },
+            { key: "medical", label: "Medical Chronology", count: medicalAll.length },
+            { key: "event", label: "Event Chronology", count: eventAll.length },
           ] as const).map((t) => {
             const active = subTab === t.key;
             return (
@@ -1069,8 +1171,17 @@ export function MedicalTimelineTab({ documents, goTo }: TabProps) {
           })}
         </div>
 
-        {/* Right — expandable search (date & event filters live in the left Filters card) */}
+        {/* Right — Add Chronology + expandable search (date & event filters live in the Filters card) */}
         <div className="flex items-center gap-2">
+          {/* Add Chronology — opens the form for whichever tab is active */}
+          <button
+            onClick={() => setAddOpen(true)}
+            className="btn btn-primary gap-1.5 px-4 py-2"
+            title={subTab === "medical" ? "Add a medical chronology event" : "Add a case chronology event"}
+          >
+            <Plus className="w-4 h-4" strokeWidth={1.75} /> Add Chronology
+          </button>
+
           {/* Expandable search — icon-only until clicked */}
           <div className={`flex items-center rounded-lg border transition-all duration-300 ease-out overflow-hidden ${
             searchOpen ? "w-[240px] border-line bg-white" : "w-9 border-transparent bg-transparent"
@@ -1137,7 +1248,7 @@ export function MedicalTimelineTab({ documents, goTo }: TabProps) {
         {events.map((ev, i) => {
           const isLast = i === events.length - 1;
           return (
-            <div key={ev.title} className="relative flex gap-5 pb-6 last:pb-0">
+            <div key={ev.id ?? ev.title} className="relative flex gap-5 pb-6 last:pb-0">
               {/* Marker + connector */}
               <div className="flex flex-col items-center shrink-0">
                 <div className="w-3.5 h-3.5 rounded-full bg-white border-2 border-brand mt-6" />
@@ -1152,7 +1263,17 @@ export function MedicalTimelineTab({ documents, goTo }: TabProps) {
                     <Calendar className="w-3.5 h-3.5 text-[#5B6B78]" strokeWidth={1.75} />
                     {ev.date}{ev.time && <span className="text-[#9BA8B4]"> · {ev.time}</span>}
                   </div>
-                  <span className="pill pill-complete shrink-0"><ShieldCheck className="w-3.5 h-3.5" strokeWidth={1.75} /> Verified</span>
+                  {/* Origin — generated from verified evidence, or added by the attorney */}
+                  {ev.source === "user" ? (
+                    <span
+                      className="pill pill-neutral shrink-0"
+                      title={ev.addedBy ? `Added by ${ev.addedBy}${ev.addedAt ? ` · ${ev.addedAt}` : ""}` : undefined}
+                    >
+                      <UserPlus className="w-3.5 h-3.5" strokeWidth={1.75} /> User Added
+                    </span>
+                  ) : (
+                    <span className="pill pill-complete shrink-0"><ShieldCheck className="w-3.5 h-3.5" strokeWidth={1.75} /> Verified</span>
+                  )}
                 </div>
 
                 {/* Title */}
@@ -1162,26 +1283,29 @@ export function MedicalTimelineTab({ documents, goTo }: TabProps) {
                 <p className="body-text leading-relaxed">{ev.description}</p>
 
                 {/* Event Chronology — Key Actions beside Supporting Evidence (+ actions under it) */}
-                {subTab === "event" && (
+                {subTab === "event" && ((ev.actions?.length ?? 0) > 0 || ev.evidence.length > 0) && (
                   <div className="mt-4 pt-4 border-t border-line grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
                     {/* Key Actions — the 2–3 most important; full list lives in the preview */}
                     {ev.actions && ev.actions.length > 0 && (
                       <div className="rounded-xl border border-line bg-offwhite p-4">
                         <div className="flex items-center justify-between gap-2 mb-2.5">
                           <div className="eyebrow">Key Actions</div>
-                          <button onClick={() => openEvidence(ev, { ai: "actions" })} className="inline-flex items-center gap-1 text-xs font-semibold text-deep hover:text-ink transition-colors shrink-0">
-                            View Details <ArrowRight className="w-3.5 h-3.5" strokeWidth={1.75} />
-                          </button>
+                          {/* The detail drawer is evidence-backed — only offered when documents are attached */}
+                          {ev.evidence.length > 0 && (
+                            <button onClick={() => openEvidence(ev, { ai: "actions" })} className="inline-flex items-center gap-1 text-xs font-semibold text-deep hover:text-ink transition-colors shrink-0">
+                              View Details <ArrowRight className="w-3.5 h-3.5" strokeWidth={1.75} />
+                            </button>
+                          )}
                         </div>
                         <ul className="space-y-1.5">
-                          {ev.actions.slice(0, 3).map((a) => (
+                          {(ev.evidence.length > 0 ? ev.actions.slice(0, 3) : ev.actions).map((a) => (
                             <li key={a.text} className="flex items-start gap-2">
                               <span className="w-1.5 h-1.5 rounded-full bg-deep mt-[7px] shrink-0" />
                               <span className="body-text leading-relaxed">{a.text}</span>
                             </li>
                           ))}
                         </ul>
-                        {ev.actions.length > 3 && (
+                        {ev.evidence.length > 0 && ev.actions.length > 3 && (
                           <button onClick={() => openEvidence(ev, { ai: "actions" })} className="mt-2.5 text-xs font-semibold text-deep hover:text-ink transition-colors">
                             +{ev.actions.length - 3} more actions
                           </button>
@@ -1359,8 +1483,8 @@ export function MedicalTimelineTab({ documents, goTo }: TabProps) {
         <div className="rounded-2xl border border-line bg-white p-5 flex flex-col gap-2.5">
           <h3 className="card-title">Timeline Navigator</h3>
           {([
-            { key: "medical", num: MEDICAL_CHRONOLOGY.length, label: "Medical Events", helper: "Verified treatment timeline" },
-            { key: "event", num: EVENT_CHRONOLOGY.length, label: "Case Events", helper: "Incident & legal timeline" },
+            { key: "medical", num: medicalAll.length, label: "Medical Events", helper: "Verified treatment timeline" },
+            { key: "event", num: eventAll.length, label: "Case Events", helper: "Incident & legal timeline" },
           ] as const).map((c) => {
             const active = subTab === c.key;
             return (
@@ -1398,8 +1522,34 @@ export function MedicalTimelineTab({ documents, goTo }: TabProps) {
       actions={evidenceEvent?.actions}
       docs={evidenceDocs}
       initialAI={evidenceAI}
+      source={evidenceEvent?.source}
+      addedBy={evidenceEvent?.addedBy}
+      addedAt={evidenceEvent?.addedAt}
+      details={evidenceEvent?.details}
       onClose={() => setEvidenceEvent(null)}
     />
+
+    {/* Add Chronology — the active tab decides which form opens */}
+    <AddChronologyDrawer
+      open={addOpen}
+      kind={subTab}
+      documents={attachableDocs}
+      existing={(subTab === "medical" ? medicalAll : eventAll).map((e) => ({ date: e.date, title: e.title, description: e.description }))}
+      addedBy={CURRENT_USER}
+      onCancel={() => setAddOpen(false)}
+      onSubmit={addChronology}
+    />
+
+    {/* Confirmation toast */}
+    {toast && (
+      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[80] flex items-center gap-2 rounded-xl border border-line bg-white shadow-lg px-4 py-3">
+        <CheckCircle className="w-4 h-4 text-[#15803D] shrink-0" strokeWidth={1.75} />
+        <span className="text-sm font-medium text-ink">{toast}</span>
+        <button onClick={() => setToast(null)} aria-label="Dismiss" className="ml-1 p-1 rounded-md text-[#8A98A3] hover:bg-wash hover:text-ink transition-colors">
+          <X className="w-3.5 h-3.5" strokeWidth={2} />
+        </button>
+      </div>
+    )}
     </>
   );
 }
