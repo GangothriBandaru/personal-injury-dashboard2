@@ -9,6 +9,7 @@ import {
   type StageId, type UserChronology,
 } from "../workspace/WorkspaceTabs";
 import { StageEvidenceSection } from "../workspace/StageEvidence";
+import { EvidenceStageTab } from "../workspace/EvidenceStage";
 import { DocumentWorkspaceModal } from "../components/DocumentWorkspace";
 import { DemandSpacePage } from "./DemandSpacePage";
 import { DemandPackageEditorPage } from "./DemandPackageEditorPage";
@@ -27,13 +28,16 @@ const TABS = [
   { id: "economic", label: "Damages Analysis" },
   { id: "noneconomic", label: "Negligence" },
   { id: "liability", label: "Violations" },
+  { id: "evidencehub", label: "Evidence" },
   { id: "evidence", label: "Case Journey" },
   { id: "demand", label: "Intelligence" },
   { id: "negotiation", label: "Negotiations" },
 ];
 
-// The eight stages that close with an Evidence section (Demand Space is not a stage).
-const STAGE_IDS = TABS.map((t) => t.id) as StageId[];
+// Stages that close with a stage-specific Evidence section. The Evidence stage
+// itself is excluded — it is the evidence surface, so a summary of its own
+// evidence at the bottom would be circular.
+const STAGE_IDS = TABS.map((t) => t.id).filter((id) => id !== "evidencehub") as StageId[];
 // Stages laid out at max-w-4xl — the Evidence section matches their width.
 const NARROW_STAGES: StageId[] = ["evidence", "negotiation"];
 
@@ -176,6 +180,14 @@ export function CaseWorkspacePage({ caseData, analysisFindings = [], documents =
       case "economic": return <EconomicDamagesTab {...tabProps} />;
       case "noneconomic": return <NonEconomicDamagesTab {...tabProps} />;
       case "liability": return <LiabilityAnalysisTab {...tabProps} />;
+      case "evidencehub": return (
+        <EvidenceStageTab
+          documents={documents}
+          findings={analysisFindings}
+          userChronology={userChronology}
+          goTo={setActiveTab}
+        />
+      );
       case "evidence": return <EvidenceRepositoryTab {...tabProps} />;
       case "demand": return <DemandPackageTab {...tabProps} />;
       case "negotiation": return <NegotiationTab {...tabProps} />;

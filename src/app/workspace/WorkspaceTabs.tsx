@@ -122,7 +122,7 @@ function padDocsToCount(names: string[], category: string, count: number): strin
 
 // Resolve a filename to a workspace-document shape (category/source/date) for the
 // shared Document Workspace. Unknown files fall back to a generic attorney doc.
-function buildDocResolver(documents: CaseDocument[]) {
+export function buildDocResolver(documents: CaseDocument[]) {
   const categories = classifyDocuments(documents);
   return (file: string) => {
     const d = documents.find((x) => x.name === file);
@@ -5104,9 +5104,12 @@ export function NegotiationTab({ model }: TabProps) {
 // the repository matching that stage's subject matter. The same MRI can back
 // Chronology, Damages, and Intelligence while remaining a single document.
 
+// `evidence` is the long-standing id of the Case Journey stage; the Evidence
+// stage added after Violations uses `evidencehub` so existing goTo("evidence")
+// callers keep working.
 export type StageId =
   | "overview" | "medical" | "economic" | "noneconomic"
-  | "liability" | "evidence" | "demand" | "negotiation";
+  | "liability" | "evidencehub" | "evidence" | "demand" | "negotiation";
 
 // Human label per stage — matches the workspace tab labels.
 export const STAGE_LABELS: Record<StageId, string> = {
@@ -5115,6 +5118,7 @@ export const STAGE_LABELS: Record<StageId, string> = {
   economic: "Damages Analysis",
   noneconomic: "Negligence",
   liability: "Violations",
+  evidencehub: "Evidence",
   evidence: "Case Journey",
   demand: "Intelligence",
   negotiation: "Negotiations",
@@ -5133,6 +5137,9 @@ const STAGE_REPO_MATCH: Record<StageId, RegExp> = {
   noneconomic: /(police|witness|accident|incident|crash|camera|dashcam|vehicle|photo|scene|reconstruction|officer|driver|safety|ems|dispatch)/,
   // Regulatory, citation, inspection, compliance.
   liability: /(citation|violation|inspection|compliance|policy|log|fmcsa|carrier|safety|regulation|standard|permit|officer|police|scene|camera|dashcam|edr|skid|signal)/,
+  // The Evidence stage reads the whole case record — it builds its own
+  // catalogue from every stage, so this rule is only a fallback.
+  evidencehub: /.*/,
   // Filings, claims, correspondence, case preparation.
   evidence: /(claim|insurance|policy|demand|letter|correspondence|filing|court|motion|pleading|wage|medical_records)/,
   // Everything the AI analysis reads from.
@@ -5247,6 +5254,14 @@ const STAGE_INSIGHT: Record<StageId, { lens: string; points: string[] }> = {
       "Ties the conduct to a specific statutory or regulatory standard.",
       "Supports the cited violation with a contemporaneous record.",
       "Usable as an exhibit for the compliance argument.",
+    ],
+  },
+  evidencehub: {
+    lens: "what it establishes as evidence",
+    points: [
+      "Classified and cross-referenced against the rest of the case record.",
+      "Linked to the stages that rely on it.",
+      "Reviewed for corroboration, contradictions and gaps.",
     ],
   },
   evidence: {
