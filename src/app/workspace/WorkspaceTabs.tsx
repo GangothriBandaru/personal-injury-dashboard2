@@ -503,6 +503,15 @@ export function OverviewTab({ model, documents, goTo }: TabProps) {
 
 // ── Tab 2 — Chronology ────────────────────────────────────────────────────────
 
+// Structured classification behind a chronology card's contextual tags.
+// `tags` is what the card renders: primary category first, then specificity.
+export interface ChronTaxonomy {
+  eventType: "medical" | "case";
+  category: string;
+  subcategory?: string;
+  tags: string[];
+}
+
 export interface ChronEvent {
   id?: string;
   date: string;
@@ -517,6 +526,9 @@ export interface ChronEvent {
   // changes, even after AI tools are run on the event.
   source?: "system" | "user";
   category?: string;                              // set on user-added events; drives the event-type filter
+  // Structured tag metadata. The contextual tags on a card are read from here,
+  // never inferred from the title at render time.
+  taxonomy?: ChronTaxonomy;
   addedBy?: string;
   addedAt?: string;
   details?: { label: string; value: string }[];   // provider / injury / severity / notes, shown on open
@@ -525,36 +537,42 @@ export interface ChronEvent {
 const MEDICAL_CHRONOLOGY: ChronEvent[] = [
   {
     date: "Feb 14, 2026", time: "9:42 AM", title: "Initial Emergency Admission",
+    taxonomy: { eventType: "medical", category: "Emergency Care", subcategory: "Initial Assessment", tags: ["Emergency Care","Initial Assessment"] },
     description: "The plaintiff arrived by ambulance at Cook County Medical Center with acute neck pain and neurological symptoms. Trauma assessment and cervical immobilization were performed on arrival.",
     insight: "This event establishes the beginning of documented treatment within hours of the collision and supports causation.",
     evidence: ["ER_Bills.pdf", "hospital_medical_records.pdf"],
   },
   {
     date: "Feb 16, 2026", title: "MRI Completed",
+    taxonomy: { eventType: "medical", category: "Diagnostic Imaging", subcategory: "MRI", tags: ["Diagnostic Imaging","MRI"] },
     description: "Diagnostic MRI of the cervical spine was performed, confirming C5–C6 and C6–C7 disc herniations with nerve-root compression.",
     insight: "Objective imaging links the collision to a confirmed, diagnosable injury — a cornerstone of the damages case.",
     evidence: ["MRI_Report_2026.pdf"],
   },
   {
     date: "Feb 23, 2026", title: "Neurology Consultation",
+    taxonomy: { eventType: "medical", category: "Specialist Consultation", subcategory: "Neurology", tags: ["Specialist Consultation","Neurology"] },
     description: "A neurology specialist evaluated the plaintiff, confirmed traumatic causation, and recommended a course of conservative management with physical therapy.",
     insight: "Specialist confirmation of traumatic causation strengthens the link between the incident and the injury.",
     evidence: ["hospital_medical_records.pdf"],
   },
   {
     date: "Mar 2, 2026", title: "Physical Therapy Started",
+    taxonomy: { eventType: "medical", category: "Rehabilitation", subcategory: "Physical Therapy", tags: ["Rehabilitation","Physical Therapy"] },
     description: "The plaintiff began a structured, multi-modal physical therapy program targeting cervical mobility and pain management.",
     insight: "Prompt, continuous treatment demonstrates the seriousness of the injury and supports ongoing-care damages.",
     evidence: ["physical_therapy_notes.pdf"],
   },
   {
     date: "Apr 20, 2026", title: "Mid-Treatment Re-Evaluation",
+    taxonomy: { eventType: "medical", category: "Follow-Up", subcategory: "Treatment Progress", tags: ["Follow-Up","Treatment Progress"] },
     description: "A re-evaluation documented persistent range-of-motion deficits and chronic pain despite ongoing therapy.",
     insight: "Documented lack of full recovery supports the severity and permanence of the injury.",
     evidence: ["physical_therapy_notes.pdf"],
   },
   {
     date: "Jun 5, 2026", title: "Follow-Up Evaluation",
+    taxonomy: { eventType: "medical", category: "Follow-Up Care", subcategory: "Prognosis", tags: ["Follow-Up Care","Prognosis"] },
     description: "A follow-up assessment recorded a guarded prognosis with permanent residual impairment anticipated, and recommended continued care.",
     insight: "A guarded prognosis substantiates future-care and non-economic damages.",
     evidence: ["hospital_medical_records.pdf"],
@@ -566,6 +584,7 @@ const MEDICAL_CHRONOLOGY: ChronEvent[] = [
 const EVENT_CHRONOLOGY: ChronEvent[] = [
   {
     date: "Feb 14, 2026", time: "9:05 AM", title: "Collision Occurred",
+    taxonomy: { eventType: "case", category: "Accident", subcategory: "Liability", tags: ["Accident","Liability"] },
     description: "A commercial vehicle operated by Midwest Logistics Co. failed to yield at a controlled intersection and struck the plaintiff's vehicle.",
     insight: "This is the originating event of the claim and the basis for the negligence theory against the defendant.",
     actions: [
@@ -577,6 +596,7 @@ const EVENT_CHRONOLOGY: ChronEvent[] = [
   },
   {
     date: "Feb 14, 2026", title: "Initial Emergency Response",
+    taxonomy: { eventType: "case", category: "Emergency Response", subcategory: "Accident Response", tags: ["Emergency Response","Accident Response"] },
     description: "Emergency services responded to the scene and transported the plaintiff to Cook County Medical Center for assessment.",
     insight: "Establishes an immediate, contemporaneous record of the incident and the plaintiff's injuries.",
     actions: [
@@ -589,6 +609,7 @@ const EVENT_CHRONOLOGY: ChronEvent[] = [
   },
   {
     date: "Feb 14 – 15, 2026", title: "Police Investigation",
+    taxonomy: { eventType: "case", category: "Police Investigation", subcategory: "Liability Evidence", tags: ["Police Investigation","Liability Evidence"] },
     description: "Responding officers investigated the scene, determined fault, and collected initial witness accounts.",
     insight: "The officer's fault determination and witness corroboration are strong, objective evidence of liability.",
     actions: [
@@ -602,6 +623,7 @@ const EVENT_CHRONOLOGY: ChronEvent[] = [
   },
   {
     date: "Feb 20, 2026", title: "Insurance Claim Filed",
+    taxonomy: { eventType: "case", category: "Insurance", subcategory: "Claim", tags: ["Insurance","Claim"] },
     description: "A claim was filed against the defendant's commercial liability policy and acknowledged by the carrier.",
     insight: "Confirmed coverage ensures an adequate source of recovery for the projected demand.",
     actions: [
@@ -613,6 +635,7 @@ const EVENT_CHRONOLOGY: ChronEvent[] = [
   },
   {
     date: "Mar – May, 2026", title: "Case Preparation",
+    taxonomy: { eventType: "case", category: "Case Preparation", subcategory: "Evidence Collection", tags: ["Case Preparation","Evidence Collection"] },
     description: "Medical records and supporting documentation were assembled to substantiate liability and damages.",
     insight: "A complete, verified record base underpins both causation and the damages calculation.",
     actions: [
@@ -625,6 +648,7 @@ const EVENT_CHRONOLOGY: ChronEvent[] = [
   },
   {
     date: "Jun 9 – 11, 2026", title: "Settlement Negotiation",
+    taxonomy: { eventType: "case", category: "Settlement", subcategory: "Negotiation", tags: ["Settlement","Negotiation"] },
     description: "An attorney-ready demand package was delivered to the carrier and the matter advanced to negotiation.",
     insight: "Anchors the negotiation above the projected settlement range with documented support.",
     actions: [
@@ -720,6 +744,7 @@ function toChronEvent(c: CreatedChronology): ChronEvent {
     actions: c.actions && c.actions.length > 0 ? c.actions : undefined,
     source: "user",
     category: c.category,
+    taxonomy: c.taxonomy.tags.length > 0 ? c.taxonomy : undefined,
     addedBy: c.addedBy,
     addedAt: c.addedAt,
     details: c.details,
@@ -977,6 +1002,27 @@ function ExpertPanel({ onClose }: { ev?: ChronEvent; onClose?: () => void }) {
         />
         <button className="btn btn-primary shrink-0">Consult Expert</button>
       </div>
+    </div>
+  );
+}
+
+// Contextual tags shown under a chronology card's title. Reads the event's
+// structured taxonomy — never inferred from the title at render time — and
+// renders nothing for an event that has not been classified. Capped at three
+// so the strip stays scannable.
+function ChronologyTags({ taxonomy }: { taxonomy?: ChronTaxonomy }) {
+  const tags = taxonomy?.tags?.filter(Boolean).slice(0, 3) ?? [];
+  if (tags.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 mb-2.5">
+      {tags.map((t) => (
+        <span
+          key={t}
+          className="inline-flex items-center rounded-md border border-[#DCEEF4] bg-tint px-2 py-0.5 text-[11px] font-medium text-deep leading-[1.5]"
+        >
+          {t}
+        </span>
+      ))}
     </div>
   );
 }
@@ -1284,6 +1330,9 @@ export function MedicalTimelineTab({
 
                 {/* Title */}
                 <h3 className="card-title mb-2 leading-snug" style={{ fontSize: "18px" }}>{ev.title}</h3>
+
+                {/* Contextual tags — what the event is about, at a glance */}
+                <ChronologyTags taxonomy={ev.taxonomy} />
 
                 {/* Description */}
                 <p className="body-text leading-relaxed">{ev.description}</p>

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import {
-  X, Plus, Calendar, ChevronLeft, ChevronRight, ChevronDown, FileText, AlertTriangle, Trash2,
+  X, Plus, Calendar, ChevronLeft, ChevronRight, ChevronDown, FileText, AlertTriangle, Trash2, Sparkles, RotateCcw,
 } from "lucide-react";
 
 // ── Manual chronology creation ────────────────────────────────────────────────
@@ -20,6 +20,84 @@ const CASE_EVENT_TYPES = [
   "Legal / Case Preparation", "Settlement / Negotiation", "Court / Filing", "Communication", "Other",
 ];
 const SEVERITIES = ["Mild", "Moderate", "Severe", "Critical"];
+
+// ── Tag taxonomy ──────────────────────────────────────────────────────────────
+// Category → the specificity options available beneath it. Selecting a category
+// (and optionally a subcategory) is what generates a card's contextual tags.
+
+export const MEDICAL_TAG_CATEGORIES: Record<string, string[]> = {
+  "Emergency Care": ["Initial Assessment", "Hospitalization", "Discharge"],
+  "Diagnostic Imaging": ["MRI", "CT Scan", "X-Ray"],
+  "Diagnostic Testing": ["Medical Monitoring"],
+  "Specialist Consultation": ["Neurology", "Orthopedic Consultation", "Pain Management"],
+  "Treatment": ["Medication", "Surgery", "Pain Management"],
+  "Rehabilitation": ["Physical Therapy"],
+  "Follow-Up": ["Treatment Progress", "Re-Evaluation"],
+  "Follow-Up Care": ["Prognosis", "Permanent Impairment"],
+  "Hospitalization": ["Discharge", "Medical Monitoring"],
+};
+
+export const CASE_TAG_CATEGORIES: Record<string, string[]> = {
+  "Accident": ["Collision", "Liability"],
+  "Emergency Response": ["Accident Response"],
+  "Police Investigation": ["Liability Evidence", "Evidence Collection"],
+  "Evidence Collection": ["Witness Evidence", "Medical Evidence", "Damages Evidence"],
+  "Insurance": ["Claim", "Insurance Claim"],
+  "Case Preparation": ["Evidence Collection", "Document Collection"],
+  "Legal Review": ["Discovery", "Court Filing", "Defense Response"],
+  "Settlement": ["Negotiation", "Demand"],
+  "Case Milestone": [],
+};
+
+// Keyword rules behind the AI suggestion, used only when the attorney has not
+// picked a category. Ordered — the first match becomes the primary tag.
+const MEDICAL_HINTS: [RegExp, string, string?][] = [
+  [/\bmri\b/i, "Diagnostic Imaging", "MRI"],
+  [/\bct\b|cat scan/i, "Diagnostic Imaging", "CT Scan"],
+  [/x-?ray|radiograph/i, "Diagnostic Imaging", "X-Ray"],
+  [/emergency|ambulance|admitted|admission|\ber\b/i, "Emergency Care", "Initial Assessment"],
+  [/physical therapy|\bpt\b|rehab/i, "Rehabilitation", "Physical Therapy"],
+  [/neurolog/i, "Specialist Consultation", "Neurology"],
+  [/orthoped/i, "Specialist Consultation", "Orthopedic Consultation"],
+  [/consult|specialist|evaluated by/i, "Specialist Consultation"],
+  [/surger|operat|procedure/i, "Treatment", "Surgery"],
+  [/medication|prescrib|dispens/i, "Treatment", "Medication"],
+  [/pain management/i, "Treatment", "Pain Management"],
+  [/re-?evaluat|progress|mid-treatment/i, "Follow-Up", "Treatment Progress"],
+  [/prognos|permanent|impairment|residual/i, "Follow-Up Care", "Prognosis"],
+  [/follow-?up/i, "Follow-Up", undefined],
+  [/discharge/i, "Hospitalization", "Discharge"],
+  [/imaging|scan/i, "Diagnostic Imaging"],
+  [/treatment|therapy/i, "Treatment"],
+];
+
+const CASE_HINTS: [RegExp, string, string?][] = [
+  [/collision|crash|struck|accident|impact/i, "Accident", "Liability"],
+  [/ambulance|emergency service|first responder|dispatch|\bems\b/i, "Emergency Response", "Accident Response"],
+  [/police|officer|citation|investigat/i, "Police Investigation", "Liability Evidence"],
+  [/witness/i, "Evidence Collection", "Witness Evidence"],
+  [/insurance|carrier|policy|claim/i, "Insurance", "Claim"],
+  [/demand|settle|negotiat|offer/i, "Settlement", "Negotiation"],
+  [/court|filing|motion|pleading|discovery/i, "Legal Review", "Court Filing"],
+  [/records|document|assembl|prepar|index/i, "Case Preparation", "Evidence Collection"],
+  [/deposition|defense|response/i, "Legal Review", "Defense Response"],
+];
+
+// Suggest up to two tags from the event's own text and attachments.
+export function suggestTags(kind: "medical" | "event", title: string, description: string, evidence: string[] = []): string[] {
+  const hay = [title, description, ...evidence].join(" ");
+  const hints = kind === "medical" ? MEDICAL_HINTS : CASE_HINTS;
+  for (const [re, cat, sub] of hints) {
+    if (re.test(hay)) return sub ? [cat, sub] : [cat];
+  }
+  return [];
+}
+
+// Category + subcategory → the tags a card renders. Primary category first,
+// then specificity; duplicates collapsed and capped at three.
+export function tagsFor(category: string, subcategory: string): string[] {
+  return Array.from(new Set([category, subcategory].filter(Boolean))).slice(0, 3);
+}
 
 // Event type → the category the Chronology filter dropdown groups by, so a
 // manually added event stays reachable through the existing Filters card.
@@ -56,6 +134,8 @@ export interface CreatedChronology {
   title: string;
   description: string;
   category: string;                              // drives the existing event-type filter
+  // Structured tag metadata — what the chronology card renders as contextual tags.
+  taxonomy: { eventType: "medical" | "case"; category: string; subcategory?: string; tags: string[] };
   evidence: string[];
   actions?: { text: string }[];                  // Event Chronology key actions
   details: { label: string; value: string }[];   // provider / injury / severity / notes
@@ -324,6 +404,7 @@ interface Props {
 const emptyForm = () => ({
   title: "", date: null as Date | null, time: "", type: "", provider: "", description: "",
   injury: "", severity: "", evidence: [] as string[], notes: "", actions: [""] as string[],
+  tagCategory: "", tagSub: "", tags: [] as string[], tagsTouched: false,
 });
 type FormState = ReturnType<typeof emptyForm>;
 
@@ -354,7 +435,25 @@ export function AddChronologyDrawer({ open, kind, documents, existing, addedBy, 
   const dirty =
     f.title.trim() !== "" || !!f.date || f.time !== "" || f.type !== "" || f.provider.trim() !== "" ||
     f.description.trim() !== "" || f.injury.trim() !== "" || f.severity !== "" || f.evidence.length > 0 ||
-    f.notes.trim() !== "" || filledActions.length > 0;
+    f.notes.trim() !== "" || filledActions.length > 0 || f.tagCategory !== "" || f.tags.length > 0;
+
+  // ── Contextual tags ──
+  // A chosen category always wins. With nothing chosen, the AI suggests tags
+  // from the event's own text and attachments — and the attorney can edit
+  // either result before saving.
+  const catalogue = isMedical ? MEDICAL_TAG_CATEGORIES : CASE_TAG_CATEGORIES;
+  const tagCategories = Object.keys(catalogue);
+  const tagSubs = f.tagCategory ? catalogue[f.tagCategory] ?? [] : [];
+  const aiTags = suggestTags(kind, f.title, f.description, f.evidence);
+  const derivedTags = f.tagCategory ? tagsFor(f.tagCategory, f.tagSub) : aiTags;
+  // Once the attorney edits the strip, their list is authoritative.
+  const effectiveTags = f.tagsTouched ? f.tags : derivedTags;
+  const tagsAreSuggested = !f.tagsTouched && !f.tagCategory && aiTags.length > 0;
+
+  const removeTag = (t: string) =>
+    setF((prev) => ({ ...prev, tags: effectiveTags.filter((x) => x !== t), tagsTouched: true }));
+  const applySuggestion = () =>
+    setF((prev) => ({ ...prev, tags: aiTags, tagsTouched: true }));
 
   // Required: title, date, type, description — plus evidence for a medical event.
   const missing = {
@@ -381,6 +480,12 @@ export function AddChronologyDrawer({ open, kind, documents, existing, addedBy, 
       title: f.title.trim(),
       description: f.description.trim(),
       category: (isMedical ? MEDICAL_TYPE_CATEGORY : CASE_TYPE_CATEGORY)[f.type] ?? "Other",
+      taxonomy: {
+        eventType: isMedical ? "medical" : "case",
+        category: f.tagCategory || effectiveTags[0] || "",
+        subcategory: f.tagSub || effectiveTags[1] || undefined,
+        tags: effectiveTags,
+      },
       evidence: f.evidence,
       actions: isMedical ? undefined : filledActions.map((text) => ({ text })),
       details: [
@@ -460,6 +565,79 @@ export function AddChronologyDrawer({ open, kind, documents, existing, addedBy, 
               invalid={invalid("type")}
               onChange={(v) => { set("type", v); touch("type"); }}
             />
+          </Field>
+
+          {/* Event Category → the contextual tags shown on the chronology card */}
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Event Category">
+              <SelectField
+                value={f.tagCategory}
+                placeholder="Select a category"
+                options={tagCategories}
+                onChange={(v) => setF((prev) => ({ ...prev, tagCategory: v, tagSub: "", tagsTouched: false }))}
+              />
+            </Field>
+            <Field label={isMedical ? "Specialty / Subcategory" : "Subcategory"}>
+              <SelectField
+                value={f.tagSub}
+                placeholder={f.tagCategory ? "Optional" : "Category first"}
+                options={tagSubs}
+                onChange={(v) => setF((prev) => ({ ...prev, tagSub: v, tagsTouched: false }))}
+              />
+            </Field>
+          </div>
+
+          <Field
+            label="Tags"
+            hint={
+              effectiveTags.length === 0
+                ? "Pick a category, or add a title and description and the tags will be suggested for you."
+                : tagsAreSuggested
+                ? "Suggested from this event — remove any that do not fit before saving."
+                : "Shown on the chronology card, in this order."
+            }
+          >
+            <div className="flex flex-wrap items-center gap-1.5">
+              {effectiveTags.map((t) => (
+                <span
+                  key={t}
+                  className="inline-flex items-center gap-1 rounded-md border border-[#DCEEF4] bg-tint px-2 py-1 text-[11px] font-medium text-deep"
+                >
+                  {t}
+                  <button
+                    type="button"
+                    onClick={() => removeTag(t)}
+                    aria-label={`Remove ${t}`}
+                    className="ml-0.5 w-4 h-4 flex items-center justify-center rounded hover:bg-[#D7EEF5] transition-colors"
+                  >
+                    <X className="w-3 h-3" strokeWidth={2} />
+                  </button>
+                </span>
+              ))}
+              {tagsAreSuggested && (
+                <span className="inline-flex items-center gap-1 text-[11px] text-[#8A98A3]">
+                  <Sparkles className="w-3 h-3" strokeWidth={1.75} /> AI suggested
+                </span>
+              )}
+              {aiTags.length > 0 && effectiveTags.length === 0 && (
+                <button
+                  type="button"
+                  onClick={applySuggestion}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-white px-2.5 py-1.5 text-xs font-medium text-deep hover:border-brand hover:bg-tint transition-colors"
+                >
+                  <Sparkles className="w-3.5 h-3.5" strokeWidth={1.75} /> Use suggested tags
+                </button>
+              )}
+              {f.tagsTouched && (
+                <button
+                  type="button"
+                  onClick={() => setF((prev) => ({ ...prev, tags: [], tagsTouched: false }))}
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-[#5B6B78] hover:text-ink transition-colors"
+                >
+                  <RotateCcw className="w-3 h-3" strokeWidth={1.75} /> Reset
+                </button>
+              )}
+            </div>
           </Field>
 
           {isMedical && (
