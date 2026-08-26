@@ -1027,6 +1027,36 @@ function ChronologyTags({ taxonomy }: { taxonomy?: ChronTaxonomy }) {
   );
 }
 
+// Amounts billed on the documents attached to ONE medical chronology event.
+// Card-level only — never a chronology-wide total. A card with no billing
+// document renders nothing: absence of a bill is not a bill of zero.
+function CardMedicalBills({ evidence }: { evidence: string[] }) {
+  const bills = billsForEvidence(evidence);
+  if (bills.length === 0) return null;
+  const priced = bills.filter((b) => b.amount !== null);
+  const total = priced.reduce((sum, b) => sum + (b.amount ?? 0), 0);
+  return (
+    <div className="mt-2 flex flex-col items-end gap-1">
+      {bills.map((b) => (
+        <div key={b.doc} className="flex items-baseline gap-2 text-right">
+          <span className="text-[11px] text-[#8A98A3]">{b.label} · {b.doc}</span>
+          {b.amount === null ? (
+            <span className="text-[11px] text-[#8A98A3] italic">Bill amount unavailable</span>
+          ) : (
+            <span className="text-sm font-semibold text-ink tabular-nums">{formatUSD(b.amount)}</span>
+          )}
+        </div>
+      ))}
+      {priced.length > 1 && (
+        <div className="flex items-baseline gap-2 text-right pt-1 mt-0.5 border-t border-line">
+          <span className="eyebrow">Documented on this event</span>
+          <span className="text-sm font-semibold text-ink tabular-nums">{formatUSD(total)}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Supporting-evidence chips: one document + an aggregated "+N More".
 function EvidenceChips({ evidence, onOpen, align }: { evidence: string[]; onOpen: () => void; align?: "right" }) {
   return (
@@ -1315,7 +1345,9 @@ export function MedicalTimelineTab({
                     <Calendar className="w-3.5 h-3.5 text-[#5B6B78]" strokeWidth={1.75} />
                     {ev.date}{ev.time && <span className="text-[#9BA8B4]"> · {ev.time}</span>}
                   </div>
-                  {/* Origin — generated from verified evidence, or added by the attorney */}
+                  {/* Origin — how the entry was created. Verified is the evidence
+                      status and stays as it was; System Generated says the system
+                      built the entry. User Added is unchanged. */}
                   {ev.source === "user" ? (
                     <span
                       className="pill pill-neutral shrink-0"
@@ -1324,7 +1356,10 @@ export function MedicalTimelineTab({
                       <UserPlus className="w-3.5 h-3.5" strokeWidth={1.75} /> User Added
                     </span>
                   ) : (
-                    <span className="pill pill-complete shrink-0"><ShieldCheck className="w-3.5 h-3.5" strokeWidth={1.75} /> Verified</span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="pill pill-complete"><ShieldCheck className="w-3.5 h-3.5" strokeWidth={1.75} /> Verified</span>
+                      <span className="pill pill-neutral"><Bot className="w-3.5 h-3.5" strokeWidth={1.75} /> System Generated</span>
+                    </div>
                   )}
                 </div>
 
@@ -1426,6 +1461,7 @@ export function MedicalTimelineTab({
                         <div className="shrink-0">
                           <div className="eyebrow mb-2 text-right">Supporting Evidence</div>
                           <EvidenceChips evidence={ev.evidence} onOpen={() => openEvidence(ev)} align="right" />
+                          <CardMedicalBills evidence={ev.evidence} />
                         </div>
                       )}
                     </div>
@@ -1607,6 +1643,63 @@ export function MedicalTimelineTab({
     )}
     </>
   );
+}
+
+// ── Billing extraction ────────────────────────────────────────────────────────
+// Which case documents are actually billing documents, and whether an amount
+// could be read off them. This is an explicit classification, never inferred
+// from a filename: a document called ER_Bills is a bill, but a hospital record
+// or an imaging report that happens to sit in a billing category is not.
+// The amount itself is read from the itemised damages breakdown below, so a
+// figure shown on a chronology card reconciles with Damages Analysis.
+
+type BillExtract = { label: string; readable: boolean };
+
+const BILLING_DOCUMENTS: Record<string, BillExtract> = {
+  "er_bills.pdf": { label: "Medical Bill", readable: true },
+  "hospital_bill.pdf": { label: "Medical Bill", readable: true },
+  "therapy_invoices.pdf": { label: "Medical Bill", readable: true },
+};
+
+export interface DocumentBill {
+  doc: string;
+  label: string;
+  amount: number | null; // null = a bill, but no amount could be read from it
+}
+
+// The amount recorded against a document in the existing itemised damages
+// breakdown. Returns null when the document is not itemised anywhere.
+function itemisedAmountFor(doc: string): number | null {
+  const key = doc.toLowerCase();
+  for (const item of ECONOMIC) {
+    const line = buildDocBreakdown(item).find((d) => d.name.toLowerCase() === key);
+    if (line) return line.amount;
+  }
+  return null;
+}
+
+// A single document's bill, or null when the document is not a billing document.
+// Absence of a bill is never zero — it means nothing was billed on this record.
+export function billForDocument(doc: string): DocumentBill | null {
+  const extract = BILLING_DOCUMENTS[doc.toLowerCase()];
+  if (!extract) return null;
+  const amount = extract.readable ? itemisedAmountFor(doc) : null;
+  return { doc, label: extract.label, amount };
+}
+
+// Every bill attached to one chronology event, de-duplicated by document so a
+// document referenced twice on a card is counted once.
+export function billsForEvidence(evidence: string[]): DocumentBill[] {
+  const seen = new Set<string>();
+  const out: DocumentBill[] = [];
+  for (const name of evidence) {
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const bill = billForDocument(name);
+    if (bill) out.push(bill);
+  }
+  return out;
 }
 
 // ── Tab 3 — Damages Analysis ──────────────────────────────────────────────────
