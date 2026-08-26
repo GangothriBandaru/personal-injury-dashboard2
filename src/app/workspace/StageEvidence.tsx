@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronDown, ArrowRight, FileText, X } from "lucide-react";
+import { ChevronDown, ArrowRight, ArrowDown, ArrowUp, FileText, X } from "lucide-react";
 import type { CaseDocument } from "../types/case";
 import { classifyDocuments } from "../types/case";
 import { DocActions } from "../components/DocumentWorkspace";
@@ -20,6 +20,7 @@ interface Props extends StageEvidenceHandlers {
   stageLabel: string;      // "Chronology" — names the View All drawer
   docs: CaseDocument[];    // already narrowed to this stage
   narrow?: boolean;        // match stages laid out at max-w-4xl
+  anchorId: string;        // per-stage id the View Evidence shortcut targets
 }
 
 // One collapsible category — same markup as Collection → Documents.
@@ -113,7 +114,48 @@ function groupForStage(docs: CaseDocument[]) {
   return classifyDocuments(docs);
 }
 
-export function StageEvidenceSection({ stageLabel, docs, narrow, onPreview, onInsights, onDownload }: Props) {
+// The stage-level Evidence section is marked with a data attribute so the
+// shortcut can find whichever stage is currently mounted without being told
+// which one it is. Only one stage renders at a time, so this is unambiguous.
+const SECTION_SELECTOR = "[data-stage-evidence]";
+
+const scrollToEvidence = () => {
+  const el = document.querySelector(SECTION_SELECTOR);
+  if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+};
+
+// The workspace scrolls inside an app-shell container, not the window, so
+// returning to the top has to move that container rather than the document.
+const scrollStageToTop = () => {
+  const start = document.querySelector(SECTION_SELECTOR);
+  let el: HTMLElement | null = start?.parentElement ?? null;
+  while (el) {
+    const overflowY = getComputedStyle(el).overflowY;
+    if (/(auto|scroll)/.test(overflowY) && el.scrollHeight > el.clientHeight + 4) {
+      el.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    el = el.parentElement;
+  }
+  window.scrollTo({ top: 0, behavior: "smooth" });
+};
+
+// Quick access to the Evidence section further down the same stage. Navigation
+// only — it never leaves the stage or touches the Evidence tab in the top nav.
+export function ViewEvidenceButton({ className = "" }: { className?: string }) {
+  return (
+    <button
+      onClick={scrollToEvidence}
+      title="Jump to this stage's evidence"
+      className={`inline-flex items-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-medium text-deep hover:border-brand hover:bg-tint transition-colors ${className}`}
+    >
+      <FileText className="w-4 h-4" strokeWidth={1.75} /> View Evidence
+      <ArrowDown className="w-3.5 h-3.5" strokeWidth={1.75} />
+    </button>
+  );
+}
+
+export function StageEvidenceSection({ stageLabel, docs, narrow, anchorId, onPreview, onInsights, onDownload }: Props) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [viewAll, setViewAll] = useState(false);
   const categories = groupForStage(docs);
@@ -121,7 +163,11 @@ export function StageEvidenceSection({ stageLabel, docs, narrow, onPreview, onIn
 
   return (
     <>
-      <section className={`mt-10 pt-10 border-t border-line space-y-5 ${narrow ? "max-w-4xl" : ""}`}>
+      <section
+        id={anchorId}
+        data-stage-evidence=""
+        className={`mt-10 pt-10 border-t border-line space-y-5 scroll-mt-[192px] ${narrow ? "max-w-4xl" : ""}`}
+      >
         {/* Header — heading + live count + optional View All */}
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
@@ -130,6 +176,12 @@ export function StageEvidenceSection({ stageLabel, docs, narrow, onPreview, onIn
           </div>
           <div className="flex items-center gap-4 shrink-0">
             <span className="secondary-text">{docs.length} {docs.length === 1 ? "document" : "documents"}</span>
+            <button
+              onClick={scrollStageToTop}
+              className="inline-flex items-center gap-1 text-sm font-medium text-[#5B6B78] hover:text-ink transition-colors"
+            >
+              Back to top <ArrowUp className="w-3.5 h-3.5" strokeWidth={1.75} />
+            </button>
             {docs.length > 0 && (
               <button
                 onClick={() => setViewAll(true)}

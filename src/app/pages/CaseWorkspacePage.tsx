@@ -8,7 +8,7 @@ import {
   stageEvidence, stageDocInsights, STAGE_LABELS, EMPTY_USER_CHRONOLOGY,
   type StageId, type UserChronology,
 } from "../workspace/WorkspaceTabs";
-import { StageEvidenceSection } from "../workspace/StageEvidence";
+import { StageEvidenceSection, ViewEvidenceButton } from "../workspace/StageEvidence";
 import { EvidenceStageTab } from "../workspace/EvidenceStage";
 import { DocumentWorkspaceModal } from "../components/DocumentWorkspace";
 import { DemandSpacePage } from "./DemandSpacePage";
@@ -40,6 +40,18 @@ const TABS = [
 const STAGE_IDS = TABS.map((t) => t.id).filter((id) => id !== "evidencehub") as StageId[];
 // Stages laid out at max-w-4xl — the Evidence section matches their width.
 const NARROW_STAGES: StageId[] = ["evidence", "negotiation"];
+// Anchor for each stage's own Evidence section, targeted by its View Evidence
+// shortcut. Distinct per stage so a link always lands on the right section.
+const EVIDENCE_ANCHOR: Record<string, string> = {
+  overview: "case-overview-evidence",
+  medical: "chronology-evidence",
+  economic: "damages-evidence",
+  noneconomic: "negligence-evidence",
+  liability: "violations-evidence",
+  evidence: "case-journey-evidence",
+  demand: "intelligence-evidence",
+  negotiation: "negotiations-evidence",
+};
 
 // Canonical valuation baseline (kept consistent with the Valuation stage).
 const BASE_ECONOMIC = 161450;
@@ -267,6 +279,14 @@ export function CaseWorkspacePage({ caseData, analysisFindings = [], documents =
 
       {/* ── Scrollable content ── */}
       <div className="max-w-[1400px] mx-auto px-8 py-10">
+        {/* Quick access down to this stage's own Evidence section. Secondary to
+            the stage content, and absent on the Evidence stage itself. */}
+        {stageId && evidenceDocs.length > 0 && (
+          <div className="flex justify-end mb-4">
+            <ViewEvidenceButton />
+          </div>
+        )}
+
         {renderTab()}
 
         {/* Every stage closes with the evidence supporting THAT stage */}
@@ -274,6 +294,7 @@ export function CaseWorkspacePage({ caseData, analysisFindings = [], documents =
           <StageEvidenceSection
             key={stageId}
             stageLabel={STAGE_LABELS[stageId]}
+            anchorId={EVIDENCE_ANCHOR[stageId]}
             docs={evidenceDocs}
             narrow={NARROW_STAGES.includes(stageId)}
             onPreview={(d) => openEvidenceDoc(d, "preview")}
