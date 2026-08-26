@@ -16,7 +16,7 @@ import { CaseWorkspacePage } from "./pages/CaseWorkspacePage";
 import { NotesProvider } from "./notes/NotesContext";
 import { FloatingNotes } from "./components/FloatingNotes";
 import { AssistantProvider } from "./assistant/AssistantContext";
-import { AiAssistant } from "./assistant/AiAssistant";
+import { AssistantLauncher, AssistantPanel, AssistantMain } from "./assistant/AiAssistant";
 import {
   PipelineState, CaseDocument, AttorneyNote,
   classifyDocuments, generateAnalysisFindings
@@ -227,6 +227,8 @@ export default function App() {
         pageLabel={PAGE_LABEL[activePage] ?? "Dashboard"}
         caseName={currentCaseName}
         pipelineStage={currentStage}
+        documents={pipeline.documents}
+        findings={analysisFindings}
       >
       <div className="h-screen bg-gray-50 flex overflow-hidden">
         <DashboardSidebar
@@ -236,8 +238,11 @@ export default function App() {
           onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
         />
         <div className="flex-1 flex flex-col overflow-hidden">
-          <DashboardTopbar assistant={<AiAssistant />} />
-          <main className="flex-1 overflow-auto">{renderPage()}</main>
+          <DashboardTopbar assistant={<AssistantLauncher />} />
+          <div className="flex-1 flex min-h-0 overflow-hidden">
+            <AssistantMain>{renderPage()}</AssistantMain>
+            <AssistantPanel />
+          </div>
         </div>
       </div>
       <FloatingNotes />

@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { NotebookPen, X, Tag, Flag, Layers, FileText, Plus, ChevronLeft, CheckCircle, MoreVertical, Pencil, Trash2, Lock, Maximize2, Minimize2, Search, SlidersHorizontal } from "lucide-react";
 import { useNotes, STAGES } from "../notes/NotesContext";
 import type { Note } from "../notes/NotesContext";
+import { useAssistantPanelMode } from "../assistant/AssistantContext";
 
 const CATEGORIES = ["Liability", "Medical", "Damages", "Strategy", "General"];
 const PRIORITIES = ["Low", "Medium", "High"];
@@ -20,6 +21,9 @@ const parseTs = (s: string) => {
 };
 
 export function FloatingNotes() {
+  // Step aside for the assistant drawer, and stand down entirely while the
+  // assistant occupies the whole dashboard area.
+  const assistant = useAssistantPanelMode();
   const { notes, caseName, stage, docContext, addNote, updateNote, deleteNote } = useNotes();
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -318,13 +322,18 @@ export function FloatingNotes() {
     </div>
   );
 
+  // The assistant fills the whole dashboard area when expanded, so a floating
+  // notes button has nothing to float over and stands down.
+  if (assistant.mode === "expanded") return null;
+
   return (
     <>
       {/* Floating action button */}
       <button
         onClick={() => setOpen((o) => !o)}
         title="Notes"
-        className="fixed bottom-6 right-6 z-[60] w-14 h-14 rounded-full bg-ink hover:bg-deep text-white shadow-lg flex items-center justify-center transition-colors"
+        style={{ right: assistant.mode === "drawer" ? assistant.width + 16 : undefined }}
+        className="fixed bottom-6 right-6 z-[60] w-14 h-14 rounded-full bg-ink hover:bg-deep text-white shadow-lg flex items-center justify-center transition-all"
       >
         <NotebookPen className="w-6 h-6" strokeWidth={1.75} />
         {caseNotes.length > 0 && (
@@ -340,7 +349,8 @@ export function FloatingNotes() {
           <div className="fixed inset-0 z-[59]" onClick={closePanel} />
 
           {/* Compact panel anchored above the button */}
-          <div className="fixed bottom-24 right-6 z-[60] w-[380px] max-w-[calc(100vw-3rem)] max-h-[72vh] bg-white border border-line rounded-xl shadow-xl flex flex-col overflow-hidden">
+          <div style={{ right: assistant.mode === "drawer" ? assistant.width + 16 : undefined }}
+            className="fixed bottom-24 right-6 z-[60] w-[380px] max-w-[calc(100vw-3rem)] max-h-[72vh] bg-white border border-line rounded-xl shadow-xl flex flex-col overflow-hidden">
             {header(
               view === "create" ? (
                 <button onClick={() => { resetForm(); setView("list"); }} className="flex items-center gap-1 text-sm font-medium text-deep hover:text-ink transition-colors">

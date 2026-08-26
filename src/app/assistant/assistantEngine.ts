@@ -1,4 +1,5 @@
-import { VIOLATION_CARDS } from "../workspace/WorkspaceTabs";
+import type { AnalysisFinding, CaseDocument } from "../types/case";
+import { VIOLATION_CARDS, stageEvidence, STAGE_LABELS, type StageId } from "../workspace/WorkspaceTabs";
 import { EVIDENCE_INTEL } from "../workspace/evidenceData";
 import type { AssistantLocation } from "./AssistantContext";
 
@@ -16,17 +17,52 @@ export const CONTEXTS: { id: ContextId; label: string; blurb: string }[] = [
   { id: "global", label: "Global", blurb: "General legal principles, no case data" },
 ];
 
-export function contextLabel(id: ContextId, loc: AssistantLocation): string {
-  if (id !== "stage") return CONTEXTS.find((c) => c.id === id)!.label;
-  if (loc.stageLabel) return `Current Stage · ${loc.stageLabel}`;
-  if (loc.pipelineStage) return `Current Stage · ${loc.pipelineStage}`;
-  return `Current Stage · ${loc.pageLabel}`;
+// The attorney can scope the AI to a whole pipeline, the entire case, general
+// legal knowledge, or one specific stage in either pipeline.
+export type ContextSel =
+  | { kind: "current" }
+  | { kind: "intake" }
+  | { kind: "workspace" }
+  | { kind: "case" }
+  | { kind: "global" }
+  | { kind: "stage"; stage: WorkStageDef };
+
+export const CURRENT_CONTEXT: ContextSel = { kind: "current" };
+
+export function contextLabel(sel: ContextSel, loc: AssistantLocation): string {
+  switch (sel.kind) {
+    case "intake": return "Case Intake Pipeline";
+    case "workspace": return "Case Workspace";
+    case "case": return "Entire Case";
+    case "global": return "Global";
+    case "stage": return `${sel.stage.label} · ${sel.stage.pipeline === "intake" ? "Case Intake" : "Case Workspace"}`;
+    default: {
+      const here = loc.stageLabel || loc.pipelineStage || loc.pageLabel || "Current page";
+      return `Current Stage · ${here}`;
+    }
+  }
+}
+
+// How wide the answer engine may read for a given selection.
+export function effectiveScope(sel: ContextSel): ContextId {
+  switch (sel.kind) {
+    case "intake": return "intake";
+    case "workspace": return "workspace";
+    case "case": return "case";
+    case "global": return "global";
+    default: return "stage";
+  }
+}
+
+// A context pinned to one stage also pins the suggestions to it.
+export function pinnedStage(sel: ContextSel): WorkStageDef | null {
+  return sel.kind === "stage" ? sel.stage : null;
 }
 
 // ── Suggested prompts ─────────────────────────────────────────────────────────
 // Shown only while a conversation is empty, so they never clutter the thread.
 
-const STAGE_SUGGESTIONS: Record<string, string[]> = {
+export const STAGE_SUGGESTIONS: Record<string, string[]> = {
   evidencehub: [
     "What evidence is strongest for liability?",
     "Are there contradictions in the evidence?",
@@ -133,7 +169,7 @@ const CANONICAL: Record<string, string> = (() => {
   return map;
 })();
 
-const fileName = (key: string) => CANONICAL[key.toLowerCase()] ?? key;
+export const fileName = (key: string) => CANONICAL[key.toLowerCase()] ?? key;
 
 function strongestLiabilityEvidence(): AssistantAnswer {
   const ranked = analysed()
@@ -246,13 +282,10 @@ function globalAnswer(q: string): AssistantAnswer {
     };
   }
   return {
-    headline: "Answering from general legal principles — Global scope uses no case data.",
-    points: [
-      "Ask about a doctrine, a standard of proof, or a procedural rule and I will set out the general position.",
-      "Switch to Entire Case or Case Workspace to ground the answer in this matter.",
-    ],
+    headline: "Ask about a doctrine, a standard of proof, or a procedural rule and I will set out the general position.",
+    points: [],
     citations: [],
-    caveat: "General information, not advice on this matter.",
+    caveat: "General information, not advice on this matter. Global scope uses no case data.",
   };
 }
 
@@ -271,11 +304,8 @@ function stageAnswer(loc: AssistantLocation, q: string): AssistantAnswer {
     };
   }
   return {
-    headline: `Reading the ${label} stage only.`,
-    points: [
-      `This scope covers what is on screen in ${label} and the evidence that stage cites.`,
-      "Widen to Case Workspace or Entire Case for anything spanning several stages.",
-    ],
+    headline: `Nothing specific on that in ${label} yet — try liability, causation, damages, contradictions or gaps.`,
+    points: [],
     citations: [],
   };
 }
@@ -298,13 +328,92 @@ export function answer(q: string, ctx: ContextId, loc: AssistantLocation): Assis
   if (ctx === "stage") return stageAnswer(loc, q);
   if (ctx === "intake") {
     return {
-      headline: `Reading the Case Intake Pipeline${loc.pipelineStage ? ` — currently at ${loc.pipelineStage}` : ""}.`,
-      points: [
-        "Intake covers Collection, Analysis, Valuation and Case Ready.",
-        "Ask what has been collected, what analysis has run, or what still blocks the case from moving forward.",
-      ],
+      headline: "Nothing specific on that across intake yet — try what has been collected, what analysis found, or what is still outstanding.",
+      points: [],
       citations: [],
     };
   }
   return caseSummary(loc);
 }
+
+// ── Work With: stage access ───────────────────────────────────────────────────
+// A stage the attorney can pull documents from, in either pipeline. Choosing
+// one never navigates the dashboard — it only widens what the assistant can
+// reach. Kept deliberately separate from Context, which is reasoning scope.
+
+export interface WorkStageDef { key: string; pipeline: "intake" | "workspace"; id: string; label: string }
+
+export const INTAKE_STAGES = ["Collection", "Analysis", "Valuation", "Case Ready"] as const;
+
+export const WORKSPACE_STAGE_IDS: StageId[] = [
+  "overview", "medical", "economic", "noneconomic", "liability",
+  "evidencehub", "evidence", "demand", "negotiation",
+];
+
+export const STAGE_TREE: { pipeline: "intake" | "workspace"; label: string; stages: WorkStageDef[] }[] = [
+  {
+    pipeline: "intake",
+    label: "Case Intake Pipeline",
+    stages: INTAKE_STAGES.map((s) => ({ key: `intake:${s}`, pipeline: "intake" as const, id: s, label: s })),
+  },
+  {
+    pipeline: "workspace",
+    label: "Case Workspace",
+    stages: WORKSPACE_STAGE_IDS.map((id) => ({
+      key: `workspace:${id}`, pipeline: "workspace" as const, id, label: STAGE_LABELS[id],
+    })),
+  },
+];
+
+// Documents reachable from a stage. Workspace stages reuse the same stage-scoped
+// evidence the workspace itself shows; intake stages read the case file.
+export function documentsForStage(
+  stage: WorkStageDef | null,
+  documents: CaseDocument[],
+  findings: AnalysisFinding[],
+): CaseDocument[] {
+  if (!stage) return documents;
+  if (stage.pipeline === "workspace") {
+    return stageEvidence(stage.id as StageId, documents, { findings });
+  }
+  switch (stage.id) {
+    case "Collection":
+      return documents; // everything collected so far
+    case "Analysis": {
+      const cited = new Set(findings.flatMap((f) => [...f.sources, ...f.evidence.map((e) => e.file)]).map((n) => n.toLowerCase()));
+      const hits = documents.filter((d) => cited.has(d.name.toLowerCase()));
+      return hits.length > 0 ? hits : documents;
+    }
+    case "Valuation":
+      return documents.filter((d) => /bill|invoice|wage|payroll|receipt|medical|mri|therapy|hospital/i.test(d.name));
+    case "Case Ready":
+      return documents.filter((d) => /demand|letter|insurance|policy|medical|wage/i.test(d.name));
+    default:
+      return documents;
+  }
+}
+
+export function workStageLabel(stage: WorkStageDef | null, loc: AssistantLocation): string {
+  if (stage) return stage.pipeline === "workspace" ? `${stage.label} · Case Workspace` : `${stage.label} · Case Intake`;
+  // Falsy checks, not ??: pipelineStage is an empty string on pages outside the
+  // intake pipeline, which would otherwise render a blank label.
+  return loc.stageLabel || loc.pipelineStage || loc.pageLabel || "Current page";
+}
+
+// ── Scope-change notice ───────────────────────────────────────────────────────
+// Shown inline in the conversation when the attorney changes scope by hand, so
+// the change is never silent and never a popup.
+
+// A short, plain notice shown inline when the reasoning scope actually changes.
+// Work With changes never produce a message — they are UI state only.
+export function contextChangeNotice(sel: ContextSel, loc: AssistantLocation): AssistantAnswer {
+  const label = contextLabel(sel, loc);
+  const line =
+    sel.kind === "case" ? "You are now chatting with the Entire Case."
+    : sel.kind === "global" ? "You are now chatting with Global context."
+    : sel.kind === "intake" ? "You are now chatting with the Case Intake Pipeline."
+    : sel.kind === "workspace" ? "You are now chatting with the Case Workspace."
+    : `You are now chatting with ${label}.`;
+  return { headline: line, points: [], citations: [] };
+}
+
