@@ -10,6 +10,7 @@ import {
 } from "../workspace/WorkspaceTabs";
 import { StageEvidenceSection, ViewEvidenceButton } from "../workspace/StageEvidence";
 import { EvidenceStageTab } from "../workspace/EvidenceStage";
+import { useReportAssistantStage } from "../assistant/AssistantContext";
 import { DocumentWorkspaceModal } from "../components/DocumentWorkspace";
 import { DemandSpacePage } from "./DemandSpacePage";
 import { DemandPackageEditorPage } from "./DemandPackageEditorPage";
@@ -71,6 +72,10 @@ const GENERATE_STEPS = [
 
 export function CaseWorkspacePage({ caseData, analysisFindings = [], documents = [], onBackToIntake, onNavigateToValuation }: CaseWorkspacePageProps) {
   const [activeTab, setActiveTab] = useState("overview");
+
+  // Tell the AI Assistant which stage is open, so its Current Stage scope
+  // follows the workspace without the attorney selecting it again.
+  useReportAssistantStage(activeTab, TABS.find((t) => t.id === activeTab)?.label);
 
   // Chronology entries the attorney added by hand. Held here so they survive
   // tab switches and so the Chronology stage's Evidence section can see the

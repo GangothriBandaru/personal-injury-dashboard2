@@ -15,6 +15,8 @@ import { CaseReadyPage } from "./pages/CaseReadyPage";
 import { CaseWorkspacePage } from "./pages/CaseWorkspacePage";
 import { NotesProvider } from "./notes/NotesContext";
 import { FloatingNotes } from "./components/FloatingNotes";
+import { AssistantProvider } from "./assistant/AssistantContext";
+import { AiAssistant } from "./assistant/AiAssistant";
 import {
   PipelineState, CaseDocument, AttorneyNote,
   classifyDocuments, generateAnalysisFindings
@@ -210,9 +212,22 @@ export default function App() {
   };
   const currentStage = STAGE_BY_PAGE[activePage] ?? "";
   const currentCaseName = selectedCase?.caseName ?? "";
+  // Human label for wherever the attorney currently is, for the assistant.
+  const PAGE_LABEL: Record<string, string> = {
+    intake: "Case Intake", workflow: "Case Intake", classification: "Classification",
+    analysis: "Analysis", valuation: "Valuation", "case-ready": "Case Ready",
+    workspace: "Case Workspace", cases: "Case Workspace", clients: "Clients",
+    communication: "Communication", demands: "Demand Letters", templates: "Templates",
+  };
 
   return (
     <NotesProvider caseName={currentCaseName} stage={currentStage}>
+      <AssistantProvider
+        page={activePage}
+        pageLabel={PAGE_LABEL[activePage] ?? "Dashboard"}
+        caseName={currentCaseName}
+        pipelineStage={currentStage}
+      >
       <div className="h-screen bg-gray-50 flex overflow-hidden">
         <DashboardSidebar
           activePage={activePage}
@@ -221,11 +236,12 @@ export default function App() {
           onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
         />
         <div className="flex-1 flex flex-col overflow-hidden">
-          <DashboardTopbar />
+          <DashboardTopbar assistant={<AiAssistant />} />
           <main className="flex-1 overflow-auto">{renderPage()}</main>
         </div>
       </div>
       <FloatingNotes />
+      </AssistantProvider>
     </NotesProvider>
   );
 }
