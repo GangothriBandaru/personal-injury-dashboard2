@@ -13,6 +13,10 @@ import { classifyDocuments } from "../types/case";
 import { DocumentWorkspaceModal } from "../components/DocumentWorkspace";
 import { EvidenceReviewModal } from "./EvidenceReviewModal";
 import { AddChronologyDrawer, type CreatedChronology } from "./AddChronologyDrawer";
+import {
+  useChronologyOptional, PROVENANCE_LABEL,
+  type Provenance, type ChronVersion, type ChronAddition, type ChronOverride,
+} from "../chronology/ChronologyContext";
 import { InjuryIntelligenceSection } from "../components/InjuryIntelligenceSection";
 
 // ── Shared model & helpers ────────────────────────────────────────────────────
@@ -525,6 +529,11 @@ export interface ChronEvent {
   // "user" = created by hand in the Add Chronology drawer. The origin never
   // changes, even after AI tools are run on the event.
   source?: "system" | "user";
+  // Provenance beyond system/user: set when the assistant created or changed
+  // the entry, or when the attorney edited one. Never overwritten.
+  provenance?: Provenance;
+  history?: ChronVersion[];
+  evidencePage?: string;
   category?: string;                              // set on user-added events; drives the event-type filter
   // Structured tag metadata. The contextual tags on a card are read from here,
   // never inferred from the title at render time.
@@ -661,7 +670,14 @@ const EVENT_CHRONOLOGY: ChronEvent[] = [
 ];
 
 // The signed-in attorney — stamped on manually created chronology entries.
-const CURRENT_USER = "Jennifer Davis";
+export const CURRENT_USER = "Jennifer Davis";
+
+// Titles already on the seeded timelines, so the assistant only ever proposes
+// events the chronology does not already carry.
+export const CHRONOLOGY_TITLES = {
+  medical: MEDICAL_CHRONOLOGY.map((e) => e.title),
+  event: EVENT_CHRONOLOGY.map((e) => e.title),
+};
 
 // ── Chronology toolbar helpers ────────────────────────────────────────────────
 
@@ -728,6 +744,28 @@ function mergeChronologically(base: ChronEvent[], added: ChronEvent[]): ChronEve
       return a.i - b.i;
     })
     .map((x) => x.ev);
+}
+
+// Store additions render as ordinary chronology cards; only the badge differs.
+function additionToEvent(a: ChronAddition): ChronEvent {
+  return {
+    id: a.id, date: a.date, time: a.time, title: a.title, description: a.description,
+    insight: a.insight, evidence: a.evidence, evidencePage: a.evidencePage,
+    source: a.provenance === "user" ? "user" : "system",
+    provenance: a.provenance, history: a.history,
+    category: a.category, taxonomy: a.taxonomy, details: a.details,
+    addedBy: a.addedBy, addedAt: a.addedAt,
+  };
+}
+
+// An override edits a seeded event in place and records the change on it. The
+// previous wording lives on in `history`, never overwritten.
+function applyOverrides(events: ChronEvent[], overrides: Record<string, ChronOverride>): ChronEvent[] {
+  return events.map((ev) => {
+    const o = overrides[ev.title];
+    if (!o) return ev;
+    return { ...ev, ...o.patch, provenance: o.provenance, history: o.history };
+  });
 }
 
 // A manually created entry, as the drawer hands it back.
@@ -1057,6 +1095,112 @@ function CardMedicalBills({ evidence }: { evidence: string[] }) {
   );
 }
 
+// Provenance badges. `Verified` describes the evidence; the second badge says
+// who or what created the entry, and opens its change history when there is one.
+function ProvenanceBadges({ ev, onHistory }: { ev: ChronEvent; onHistory: () => void }) {
+  const prov: Provenance = ev.provenance ?? (ev.source === "user" ? "user" : "system");
+  const label = PROVENANCE_LABEL[prov];
+  const Icon = prov === "user" || prov === "user-edited" ? UserPlus : prov.startsWith("ai") ? Sparkles : Bot;
+  const hasHistory = !!ev.history && ev.history.length > 0;
+
+  const badge = (
+    <span
+      className={`pill pill-neutral ${hasHistory ? "cursor-pointer hover:bg-[#D7EEF5] transition-colors" : ""}`}
+      onClick={hasHistory ? onHistory : undefined}
+      title={hasHistory ? "View change history" : ev.addedBy ? `Added by ${ev.addedBy}` : undefined}
+    >
+      <Icon className="w-3.5 h-3.5" strokeWidth={1.75} /> {label}
+      {hasHistory && <History className="w-3 h-3 ml-0.5" strokeWidth={1.75} />}
+    </span>
+  );
+
+  // A manually added entry carries no evidence-verification status.
+  if (prov === "user") return <div className="flex items-center gap-1.5 shrink-0">{badge}</div>;
+  return (
+    <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+      <span className="pill pill-complete"><ShieldCheck className="w-3.5 h-3.5" strokeWidth={1.75} /> Verified</span>
+      {badge}
+    </div>
+  );
+}
+
+// Change history — every version an entry has been through, newest first.
+function ChangeHistoryDrawer({ ev, onClose }: { ev: ChronEvent; onClose: () => void }) {
+  const versions = [...(ev.history ?? [])].reverse();
+  return (
+    <>
+      <div className="fixed inset-0 bg-ink/40 z-[70]" onClick={onClose} />
+      <div className="fixed top-0 right-0 h-full w-[460px] max-w-[92vw] bg-white shadow-xl z-[70] flex flex-col">
+        <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-line shrink-0">
+          <div className="min-w-0">
+            <div className="eyebrow mb-1">Change History</div>
+            <h2 className="card-title">{ev.title}</h2>
+            <div className="mono-ref mt-1">{ev.date}{ev.time ? ` · ${ev.time}` : ""}</div>
+          </div>
+          <button onClick={onClose} title="Close" className="p-1.5 hover:bg-tint rounded-lg transition-colors shrink-0">
+            <X className="w-5 h-5 text-[#5B6B78]" strokeWidth={1.75} />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-5">
+          {versions.length === 0 ? (
+            <p className="secondary-text">No changes recorded for this entry.</p>
+          ) : (
+            <div className="relative">
+              {versions.map((v, i) => (
+                <div key={v.version} className="relative flex gap-3 pb-6 last:pb-0">
+                  <div className="flex flex-col items-center shrink-0">
+                    <div className="w-2.5 h-2.5 rounded-full bg-white border-2 border-brand mt-1.5" />
+                    {i < versions.length - 1 && <div className="w-px flex-1 bg-line mt-1.5" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-semibold text-ink">v{v.version} · {v.label}</span>
+                      <span className="mono-ref">{v.at}</span>
+                    </div>
+                    {v.reason && <p className="body-text leading-relaxed mt-1.5">{v.reason}</p>}
+                    <div className="rounded-xl border border-line divide-y divide-line mt-2.5">
+                      <div className="px-3.5 py-2">
+                        <div className="eyebrow mb-0.5">Event</div>
+                        <p className="body-text leading-relaxed">{v.snapshot.title}</p>
+                      </div>
+                      <div className="px-3.5 py-2">
+                        <div className="eyebrow mb-0.5">Description</div>
+                        <p className="body-text leading-relaxed">{v.snapshot.description}</p>
+                      </div>
+                      {v.sources && v.sources.length > 0 && (
+                        <div className="px-3.5 py-2">
+                          <div className="eyebrow mb-1">Source</div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {v.sources.map((d) => (
+                              <span key={d} className="inline-flex items-center gap-1.5 rounded-md border border-line bg-offwhite px-2.5 py-1 text-xs text-ink">
+                                <FileText className="w-3.5 h-3.5 text-deep" strokeWidth={1.75} /> {d}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between gap-4 px-3.5 py-2">
+                        <span className="text-sm text-[#5B6B78]">Modified by</span>
+                        <span className="text-sm font-medium text-ink">{v.by}</span>
+                      </div>
+                      {v.approvedBy && (
+                        <div className="flex items-center justify-between gap-4 px-3.5 py-2">
+                          <span className="text-sm text-[#5B6B78]">Approved by</span>
+                          <span className="text-sm font-medium text-ink">{v.approvedBy}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
 // Supporting-evidence chips: one document + an aggregated "+N More".
 function EvidenceChips({ evidence, onOpen, align }: { evidence: string[]; onOpen: () => void; align?: "right" }) {
   return (
@@ -1122,10 +1266,17 @@ export function MedicalTimelineTab({
   const userMedical = userChronology.medical;
   const userEvent = userChronology.event;
   const [toast, setToast] = useState<string | null>(null);
+  const [historyEvent, setHistoryEvent] = useState<ChronEvent | null>(null);
 
   // Full timelines — generated events with the attorney's entries slotted in by date.
-  const medicalAll = mergeChronologically(MEDICAL_CHRONOLOGY, userMedical);
-  const eventAll = mergeChronologically(EVENT_CHRONOLOGY, userEvent);
+  // Seeded events, plus anything the attorney or the assistant added, with any
+  // approved edits applied on top. One timeline, several provenances.
+  const store = useChronologyOptional();
+  const aiMedical = (store?.additions ?? []).filter((a) => a.kind === "medical").map(additionToEvent);
+  const aiEvent = (store?.additions ?? []).filter((a) => a.kind === "event").map(additionToEvent);
+  const overrides = store?.overrides ?? {};
+  const medicalAll = applyOverrides(mergeChronologically(MEDICAL_CHRONOLOGY, [...userMedical, ...aiMedical]), overrides);
+  const eventAll = applyOverrides(mergeChronologically(EVENT_CHRONOLOGY, [...userEvent, ...aiEvent]), overrides);
 
   const addChronology = (c: CreatedChronology) => {
     onAddChronology?.(c.kind, toChronEvent(c));
@@ -1345,22 +1496,10 @@ export function MedicalTimelineTab({
                     <Calendar className="w-3.5 h-3.5 text-[#5B6B78]" strokeWidth={1.75} />
                     {ev.date}{ev.time && <span className="text-[#9BA8B4]"> · {ev.time}</span>}
                   </div>
-                  {/* Origin — how the entry was created. Verified is the evidence
-                      status and stays as it was; System Generated says the system
-                      built the entry. User Added is unchanged. */}
-                  {ev.source === "user" ? (
-                    <span
-                      className="pill pill-neutral shrink-0"
-                      title={ev.addedBy ? `Added by ${ev.addedBy}${ev.addedAt ? ` · ${ev.addedAt}` : ""}` : undefined}
-                    >
-                      <UserPlus className="w-3.5 h-3.5" strokeWidth={1.75} /> User Added
-                    </span>
-                  ) : (
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <span className="pill pill-complete"><ShieldCheck className="w-3.5 h-3.5" strokeWidth={1.75} /> Verified</span>
-                      <span className="pill pill-neutral"><Bot className="w-3.5 h-3.5" strokeWidth={1.75} /> System Generated</span>
-                    </div>
-                  )}
+                  {/* Origin — how the entry came to exist. Verified is the
+                      evidence status and is unchanged; the second badge records
+                      provenance and is never overwritten by later AI work. */}
+                  <ProvenanceBadges ev={ev} onHistory={() => setHistoryEvent(ev)} />
                 </div>
 
                 {/* Title */}
@@ -1630,6 +1769,8 @@ export function MedicalTimelineTab({
       onCancel={() => setAddOpen(false)}
       onSubmit={addChronology}
     />
+
+    {historyEvent && <ChangeHistoryDrawer ev={historyEvent} onClose={() => setHistoryEvent(null)} />}
 
     {/* Confirmation toast */}
     {toast && (

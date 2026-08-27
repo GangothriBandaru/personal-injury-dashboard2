@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from "react";
 import type { AnalysisFinding, CaseDocument } from "../types/case";
 import type { ContextSel, AssistantAnswer } from "./assistantEngine";
+import type { ChronCandidate, ChronEdit } from "./chronologyActions";
 
 // ── Assistant store ───────────────────────────────────────────────────────────
 // ONE assistant. The launcher lives in the top bar and the panel lives in the
@@ -39,6 +40,10 @@ export interface Message {
   usingDocs?: string[];
   /** A change the assistant proposes; never applied without confirmation. */
   proposal?: { doc: string; section: string; current: string; proposed: string; state: "pending" | "applied" };
+  /** Chronology events the assistant proposes adding. Approval is per event. */
+  chronoAdds?: { candidate: ChronCandidate; state: "pending" | "added"; source: "attorney" | "ai"; note?: string }[];
+  /** A chronology edit the assistant proposes. */
+  chronoEdit?: { edit: ChronEdit; state: "pending" | "applied" };
 }
 
 export interface Conversation {

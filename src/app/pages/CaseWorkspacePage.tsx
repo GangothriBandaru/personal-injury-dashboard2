@@ -11,6 +11,7 @@ import {
 import { StageEvidenceSection, ViewEvidenceButton } from "../workspace/StageEvidence";
 import { EvidenceStageTab } from "../workspace/EvidenceStage";
 import { useReportAssistantStage } from "../assistant/AssistantContext";
+import { useChronologyOptional } from "../chronology/ChronologyContext";
 import { DocumentWorkspaceModal } from "../components/DocumentWorkspace";
 import { DemandSpacePage } from "./DemandSpacePage";
 import { DemandPackageEditorPage } from "./DemandPackageEditorPage";
@@ -84,8 +85,17 @@ export function CaseWorkspacePage({ caseData, analysisFindings = [], documents =
 
   // ── Stage Evidence — the documents supporting whichever stage is open ──
   const stageId = STAGE_IDS.includes(activeTab as StageId) ? (activeTab as StageId) : null;
+  // Events added by the attorney and by the assistant both feed the stages that
+  // consume chronology evidence, so an approved AI event is immediately usable
+  // everywhere the timeline is read.
+  const chronoStore = useChronologyOptional();
+  const chronoEvents = [
+    ...userChronology.medical,
+    ...userChronology.event,
+    ...(chronoStore?.additions ?? []).map((a) => ({ evidence: a.evidence } as any)),
+  ];
   const evidenceDocs = stageId
-    ? stageEvidence(stageId, documents, { findings: analysisFindings, userChronology: [...userChronology.medical, ...userChronology.event] })
+    ? stageEvidence(stageId, documents, { findings: analysisFindings, userChronology: chronoEvents })
     : [];
   // Preview and Insights open the existing Document Workspace; the stage only
   // changes how the AI Insights panel frames the document.

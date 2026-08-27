@@ -12,6 +12,13 @@ import {
   documentsForStage, STAGE_TREE, type ContextSel, type AssistantAnswer, type WorkStageDef,
 } from "./assistantEngine";
 import { DOC_ACTIONS, documentAction, proposalFor, suggestionsForWork, type DocActionId } from "./documentActions";
+import { ProposedEvent, ProposedEdit } from "./ChronologyProposal";
+import {
+  detectIntent, missingCandidates, findEdit, toAddition, parseRequestedEvent,
+  type ChronCandidate, type ChronEdit,
+} from "./chronologyActions";
+import { useChronologyOptional, versionStamp, type ChronVersion } from "../chronology/ChronologyContext";
+import { CHRONOLOGY_TITLES, CURRENT_USER as CURRENT_ATTORNEY } from "../workspace/WorkspaceTabs";
 
 // ── AI Assistant ──────────────────────────────────────────────────────────────
 // The launcher sits in the top bar; the panel is part of the shell layout, so
@@ -128,7 +135,13 @@ function Proposal({ m, onApply }: { m: Message; onApply: (id: string) => void })
   );
 }
 
-function Thread({ messages, thinking, onApply }: { messages: Message[]; thinking: boolean; onApply: (id: string) => void }) {
+function Thread({
+  messages, thinking, onApply, onAddEvent, onApplyEdit,
+}: {
+  messages: Message[]; thinking: boolean; onApply: (id: string) => void;
+  onAddEvent: (msgId: string, index: number, c: ChronCandidate) => void;
+  onApplyEdit: (msgId: string, e: ChronEdit) => void;
+}) {
   return (
     <div className="space-y-5">
       {messages.map((m) =>
@@ -154,9 +167,26 @@ function Thread({ messages, thinking, onApply }: { messages: Message[]; thinking
               <Sparkles className="w-4 h-4 text-deep" strokeWidth={1.75} />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="eyebrow mb-1.5">{m.role === "system" ? (m.noticeLabel ?? "Context changed") : m.context}</div>
+              {/* Only a scope-change notice is labelled. The current context is
+                  already on screen in the toolbar, so repeating it on every
+                  reply is noise. */}
+              {m.role === "system" && (
+                <div className="eyebrow mb-1.5">{m.noticeLabel ?? "Context changed"}</div>
+              )}
               <AnswerBlock a={m.answer!} />
               {m.proposal && <Proposal m={m} onApply={onApply} />}
+              {m.chronoAdds?.map((p, i) => (
+                <ProposedEvent
+                  key={p.candidate.title}
+                  candidate={p.candidate}
+                  state={p.state}
+                  source={p.source}
+                  onAdd={(c) => onAddEvent(m.id, i, c)}
+                />
+              ))}
+              {m.chronoEdit && (
+                <ProposedEdit edit={m.chronoEdit.edit} state={m.chronoEdit.state} onApply={(e) => onApplyEdit(m.id, e)} />
+              )}
             </div>
           </div>
         ),
@@ -402,6 +432,7 @@ export function AssistantPanel() {
     conversations, activeId, setActiveId, setConversations, newConversation,
   } = useAssistant();
 
+  const chronology = useChronologyOptional();
   const [thinking, setThinking] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [docsOpen, setDocsOpen] = useState(false);
@@ -485,15 +516,158 @@ export function AssistantPanel() {
     setDocsOpen(true);
   };
 
+  // Titles already on the timeline, so the assistant only proposes what is missing.
+  const existingTitles = [
+    ...CHRONOLOGY_TITLES.medical,
+    ...CHRONOLOGY_TITLES.event,
+    ...(chronology?.additions ?? []).map((a) => a.title),
+  ];
+
   const send = (text: string) => {
     const id = Math.round(performance.now());
     push({ id: `u-${id}`, role: "user", text, context: ctxLabel, usingDocs: selectedDocs.length ? selectedDocs : undefined });
     setThinking(true);
     setShowHistory(false);
+
+    // A request to change the timeline gets a proposal; anything else is an
+    // ordinary answer with no action card.
+    const intent = chronology ? detectIntent(text) : { kind: "none" as const };
+
     setTimeout(() => {
+      const timeline = intent.kind === "create" || intent.kind === "find-missing"
+        ? (intent.timeline === "medical" ? "Medical Chronology" : "Event Chronology")
+        : "";
+
+      // The attorney named the event — prepare exactly that, never a
+      // substitute found while reading the records.
+      if (intent.kind === "create") {
+        const req = parseRequestedEvent(text, intent.timeline, selectedDocs);
+        if (req) {
+          push({
+            id: `a-${id}`, role: "assistant", context: ctxLabel,
+            answer: {
+              headline: req.verified
+                ? `I can add that event to the ${timeline}.`
+                : `I can prepare that event for the ${timeline}.`,
+              points: [], citations: [],
+              caveat: req.note,
+            },
+            chronoAdds: [{ candidate: req.candidate, state: "pending", source: "attorney", note: req.note }],
+          });
+          setThinking(false);
+          return;
+        }
+        // Nothing nameable in the request — offer what the records suggest.
+        const found = missingCandidates(intent.timeline, existingTitles);
+        push({
+          id: `a-${id}`, role: "assistant", context: ctxLabel,
+          answer: {
+            headline: found.length
+              ? `Tell me the event and I will prepare it, or add one of these from the records.`
+              : `Tell me the date and what happened and I will prepare the event.`,
+            points: [], citations: [],
+          },
+          chronoAdds: found.map((c) => ({ candidate: c, state: "pending" as const, source: "ai" as const })),
+        });
+        setThinking(false);
+        return;
+      }
+
+      // Missing-event detection runs only when it was asked for.
+      if (intent.kind === "find-missing") {
+        const found = missingCandidates(intent.timeline, existingTitles);
+        push({
+          id: `a-${id}`, role: "assistant", context: ctxLabel,
+          answer: {
+            headline: found.length === 0
+              ? `Nothing in the records looks missing from the ${timeline} right now.`
+              : found.length === 1
+              ? `I found an event in the records that may not be represented in the ${timeline}.`
+              : `I found ${found.length} events in the records that may not be represented in the ${timeline}.`,
+            points: [], citations: [],
+          },
+          chronoAdds: found.map((c) => ({ candidate: c, state: "pending" as const, source: "ai" as const })),
+        });
+        setThinking(false);
+        return;
+      }
+
+      if (intent.kind === "modify") {
+        const edit = findEdit(intent.target, null);
+        if (edit) {
+          push({
+            id: `a-${id}`, role: "assistant", context: ctxLabel,
+            answer: { headline: `Here is the change I would make to ${edit.key}.`, points: [], citations: [] },
+            chronoEdit: { edit, state: "pending" },
+          });
+          setThinking(false);
+          return;
+        }
+      }
+
       push({ id: `a-${id}`, role: "assistant", answer: answer(text, effectiveScope(context), location), context: ctxLabel });
       setThinking(false);
     }, 700);
+  };
+
+  // Approving an event writes it to the shared chronology store, which the
+  // Chronology stage renders immediately.
+  const addProposedEvent = (msgId: string, index: number, c: ChronCandidate) => {
+    if (!chronology) return;
+    chronology.addEvent(toAddition(c, CURRENT_ATTORNEY));
+    setConversations((prev) =>
+      prev.map((conv) =>
+        conv.id !== active.id ? conv : {
+          ...conv,
+          messages: [
+            ...conv.messages.map((m) =>
+              m.id !== msgId || !m.chronoAdds ? m
+                : { ...m, chronoAdds: m.chronoAdds.map((p, i) => (i === index ? { ...p, state: "added" as const } : p)) },
+            ),
+            {
+              id: `a-${Math.round(performance.now())}`, role: "assistant" as const, context: ctxLabel,
+              answer: {
+                headline: `Added to ${c.kind === "medical" ? "Medical" : "Event"} Chronology — ${c.date}, ${c.title}.`,
+                points: [], citations: [],
+              },
+            },
+          ],
+        },
+      ),
+    );
+  };
+
+  // Approving an edit records a new version; the previous wording is kept.
+  const applyProposedEdit = (msgId: string, e: ChronEdit) => {
+    if (!chronology) return;
+    const at = versionStamp();
+    const v: ChronVersion = {
+      version: 2, label: "AI Modified", at, by: "AI Assistant", approvedBy: CURRENT_ATTORNEY,
+      reason: e.reason, sources: e.sources,
+      snapshot: { title: e.key, description: e.proposed, date: "" },
+    };
+    const v1: ChronVersion = {
+      version: 1, label: "System Generated", at: "Feb 20, 2026", by: "System",
+      snapshot: { title: e.key, description: e.current, date: "" },
+    };
+    chronology.applyOverride({
+      key: e.key, kind: e.kind, patch: { [e.field]: e.proposed },
+      provenance: "ai-modified", history: [v1, v],
+    });
+    setConversations((prev) =>
+      prev.map((conv) =>
+        conv.id !== active.id ? conv : {
+          ...conv,
+          messages: [
+            ...conv.messages.map((m) => (m.id !== msgId || !m.chronoEdit ? m : { ...m, chronoEdit: { ...m.chronoEdit, state: "applied" as const } })),
+            {
+              id: `a-${Math.round(performance.now())}`, role: "assistant" as const, context: ctxLabel,
+              answer: { headline: `Chronology updated — ${e.key} was updated using ${e.sources[0]}.`, points: [], citations: [] },
+            },
+          ],
+        },
+      ),
+    );
   };
 
   const runAction = (act: DocActionId) => {
@@ -627,7 +801,13 @@ export function AssistantPanel() {
         {empty ? (
           <Suggestions items={suggestions} onPick={send} />
         ) : (
-          <Thread messages={active.messages} thinking={thinking} onApply={applyProposal} />
+          <Thread
+            messages={active.messages}
+            thinking={thinking}
+            onApply={applyProposal}
+            onAddEvent={addProposedEvent}
+            onApplyEdit={applyProposedEdit}
+          />
         )}
         <div ref={endRef} />
       </div>
