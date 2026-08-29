@@ -45,10 +45,12 @@ export function AssistantLauncher() {
 
 // The dashboard body. It shrinks when the drawer opens and steps aside entirely
 // when the assistant is expanded, so the assistant never overlays the app.
+// Hidden rather than unmounted: unmounting would reset the page, dropping the
+// attorney back to the first stage when they collapse the assistant again.
 export function AssistantMain({ children }: { children: React.ReactNode }) {
   const { open, expanded } = useAssistant();
-  if (open && expanded) return null;
-  return <main className="flex-1 min-w-0 overflow-auto">{children}</main>;
+  const hidden = open && expanded;
+  return <main className={hidden ? "hidden" : "flex-1 min-w-0 overflow-auto"}>{children}</main>;
 }
 
 // ── Message rendering ─────────────────────────────────────────────────────────
@@ -205,18 +207,73 @@ function Thread({
 
 // ── Selectors ─────────────────────────────────────────────────────────────────
 
-function ContextSelect({ value, onChange, label }: { value: ContextSel; onChange: (c: ContextSel) => void; label: string }) {
-  const [open, setOpen] = useState(false);
-  const Row = ({ on, text, onPick, indent }: { on: boolean; text: string; onPick: () => void; indent?: boolean }) => (
+// ── Dropdown building blocks ──────────────────────────────────────────────────
+// Both selectors are simple navigation trees: pipelines stay collapsed until
+// the attorney opens one, so neither menu takes over the drawer.
+
+// A selectable option inside a category. Deliberately lighter than the parent
+// heading so the menu reads as category → option at a glance.
+function MenuRow({
+  on, text, onPick,
+}: { on: boolean; text: string; onPick: () => void }) {
+  return (
     <button
-      onClick={() => { onPick(); setOpen(false); }}
-      className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${indent ? "pl-6" : ""} ${
-        on ? "bg-tint text-deep font-medium" : "text-ink hover:bg-wash"
+      onClick={onPick}
+      className={`w-full text-left pl-7 pr-3 py-1.5 rounded-md text-[13px] transition-colors ${
+        on ? "bg-tint text-deep font-medium" : "text-[#5B6B78] hover:bg-wash hover:text-ink"
       }`}
     >
       {text}
     </button>
   );
+}
+
+// A category heading. Stronger and darker than its options, with the chevron
+// right-aligned: right = collapsed, down = expanded.
+function MenuGroup({
+  label, expanded, onToggle, children,
+}: { label: string; expanded: boolean; onToggle: () => void; children: React.ReactNode }) {
+  return (
+    <div className="mt-1.5 first:mt-0">
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center justify-between gap-2 px-3 py-1.5 rounded-md text-left hover:bg-wash transition-colors"
+      >
+        <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink">{label}</span>
+        {expanded
+          ? <ChevronDown className="w-3.5 h-3.5 text-[#5B6B78] shrink-0" strokeWidth={1.75} />
+          : <ChevronRight className="w-3.5 h-3.5 text-[#5B6B78] shrink-0" strokeWidth={1.75} />}
+      </button>
+      {expanded && <div>{children}</div>}
+    </div>
+  );
+}
+
+// A category that is always open — Current Stage, which reflects where the
+// attorney actually is and so is never hidden behind a chevron.
+function MenuSection({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="mt-1.5 first:mt-0">
+      <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-ink">{label}</div>
+      {children}
+    </div>
+  );
+}
+
+// Context — what the AI reasons over.
+function ContextSelect({
+  value, onChange, label, here,
+}: {
+  value: ContextSel;
+  onChange: (c: ContextSel) => void;
+  label: string;
+  /** Where the attorney actually is — independent of the selected context. */
+  here: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [expanded, setExpandedGroup] = useState<string | null>(null);
+  const pick = (c: ContextSel) => { onChange(c); setOpen(false); setExpandedGroup(null); };
+
   return (
     <div className="relative min-w-0 flex-1">
       <div className="eyebrow mb-1.5">Context</div>
@@ -231,32 +288,44 @@ function ContextSelect({ value, onChange, label }: { value: ContextSel; onChange
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 right-0 mt-1.5 z-20 max-h-[360px] overflow-y-auto rounded-lg border border-line bg-white shadow-lg p-1">
-            <div className="eyebrow px-3 pt-2 pb-1">Current Stage</div>
-            <Row on={value.kind === "current"} text={label.replace("Current Stage · ", "")} onPick={() => onChange({ kind: "current" })} indent />
+          <div className="absolute left-0 right-0 mt-1.5 z-20 max-h-[320px] overflow-y-auto rounded-lg border border-line bg-white shadow-lg p-1">
+            <MenuSection label="Current Stage">
+              <MenuRow on={value.kind === "current"} text={here} onPick={() => pick({ kind: "current" })} />
+            </MenuSection>
+
             {STAGE_TREE.map((group) => (
-              <div key={group.pipeline}>
-                <div className="eyebrow px-3 pt-3 pb-1">{group.label}</div>
-                <Row
+              <MenuGroup
+                key={group.pipeline}
+                label={group.label}
+                expanded={expanded === group.pipeline}
+                onToggle={() => setExpandedGroup((e) => (e === group.pipeline ? null : group.pipeline))}
+              >
+                <MenuRow
                   on={value.kind === group.pipeline}
                   text={`All of ${group.label}`}
-                  onPick={() => onChange({ kind: group.pipeline })}
-                  indent
+                  onPick={() => pick({ kind: group.pipeline })}
                 />
                 {group.stages.map((st) => (
-                  <Row
+                  <MenuRow
                     key={st.key}
                     on={value.kind === "stage" && value.stage.key === st.key}
                     text={st.label}
-                    onPick={() => onChange({ kind: "stage", stage: st })}
-                    indent
+                    onPick={() => pick({ kind: "stage", stage: st })}
                   />
                 ))}
-              </div>
+              </MenuGroup>
             ))}
-            <div className="eyebrow px-3 pt-3 pb-1">Whole case</div>
-            <Row on={value.kind === "case"} text="Entire Case" onPick={() => onChange({ kind: "case" })} indent />
-            <Row on={value.kind === "global"} text="Global" onPick={() => onChange({ kind: "global" })} indent />
+
+            {/* The two case-wide scopes share one category, so the menu reads
+                as category → specific context throughout. */}
+            <MenuGroup
+              label="Whole Case"
+              expanded={expanded === "whole"}
+              onToggle={() => setExpandedGroup((e) => (e === "whole" ? null : "whole"))}
+            >
+              <MenuRow on={value.kind === "case"} text="Entire Case" onPick={() => pick({ kind: "case" })} />
+              <MenuRow on={value.kind === "global"} text="Global" onPick={() => pick({ kind: "global" })} />
+            </MenuGroup>
           </div>
         </>
       )}
@@ -264,54 +333,73 @@ function ContextSelect({ value, onChange, label }: { value: ContextSel; onChange
   );
 }
 
-function WorkWithSelect({ value, label, onChange }: { value: WorkStage | null; label: string; onChange: (w: WorkStage | null) => void }) {
+// Work With — whose documents the AI can reach. Same tree, but the stage the
+// attorney is already on sits at the top and is not repeated in its pipeline.
+function WorkWithSelect({
+  value, label, currentStageKey, onChange,
+}: {
+  value: WorkStage | null;
+  label: string;
+  currentStageKey?: string;
+  onChange: (w: WorkStage | null) => void;
+}) {
   const [open, setOpen] = useState(false);
+  const [expanded, setExpandedGroup] = useState<string | null>(null);
+  const pick = (w: WorkStage | null) => { onChange(w); setOpen(false); setExpandedGroup(null); };
+
   return (
     <div className="relative min-w-0 flex-1">
       <div className="eyebrow mb-1.5 flex items-center gap-1.5">
         <Layers className="w-3 h-3 text-deep shrink-0" strokeWidth={1.75} /> Work With
       </div>
-      <div className="relative">
-        <button
-          onClick={() => setOpen((o) => !o)}
-          title="Which stage's documents the AI can use. This does not navigate the dashboard."
-          className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
-            value ? "border-brand bg-tint text-deep" : "border-line bg-white text-ink hover:border-soft"
-          }`}
-        >
-          <span className="truncate">{label}</span>
-          <ChevronDown className={`w-4 h-4 text-[#5B6B78] shrink-0 transition-transform ${open ? "rotate-180" : ""}`} strokeWidth={1.75} />
-        </button>
-        {open && (
-          <>
-            <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-            <div className="absolute left-0 right-0 mt-1.5 z-20 max-h-[320px] overflow-y-auto rounded-lg border border-line bg-white shadow-lg p-1">
-              <button
-                onClick={() => { onChange(null); setOpen(false); }}
-                className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${!value ? "bg-tint text-deep font-medium" : "text-ink hover:bg-wash"}`}
-              >
-                Follow my current page
-              </button>
-              {STAGE_TREE.map((group) => (
-                <div key={group.pipeline}>
-                  <div className="eyebrow px-3 pt-3 pb-1.5">{group.label}</div>
-                  {group.stages.map((s) => (
-                    <button
-                      key={s.key}
-                      onClick={() => { onChange(s); setOpen(false); }}
-                      className={`w-full flex items-center gap-1.5 text-left px-3 py-2 rounded-md text-sm transition-colors ${
-                        value?.key === s.key ? "bg-tint text-deep font-medium" : "text-ink hover:bg-wash"
-                      }`}
-                    >
-                      <ChevronRight className="w-3 h-3 text-[#9BA8B4] shrink-0" strokeWidth={2} /> {s.label}
-                    </button>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        title="Which stage's documents the AI can use. This does not navigate the dashboard."
+        className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
+          value ? "border-brand bg-tint text-deep" : "border-line bg-white text-ink hover:border-soft"
+        }`}
+      >
+        <span className="truncate">{label}</span>
+        <ChevronDown className={`w-4 h-4 text-[#5B6B78] shrink-0 transition-transform ${open ? "rotate-180" : ""}`} strokeWidth={1.75} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 right-0 mt-1.5 z-20 max-h-[320px] overflow-y-auto rounded-lg border border-line bg-white shadow-lg p-1">
+            <MenuSection label="Current Stage">
+              <MenuRow
+                on={!value}
+                text={label.replace(/ · (Case Intake|Case Workspace)$/, "")}
+                onPick={() => pick(null)}
+              />
+            </MenuSection>
+
+            {STAGE_TREE.map((group) => {
+              // The stage the attorney is already on is offered above, so it is
+              // not repeated inside its own pipeline.
+              const stages = group.stages.filter((s) => s.key !== currentStageKey);
+              if (stages.length === 0) return null;
+              return (
+                <MenuGroup
+                  key={group.pipeline}
+                  label={group.label}
+                  expanded={expanded === group.pipeline}
+                  onToggle={() => setExpandedGroup((e) => (e === group.pipeline ? null : group.pipeline))}
+                >
+                  {stages.map((st) => (
+                    <MenuRow
+                      key={st.key}
+                      on={value?.key === st.key}
+                      text={st.label}
+                      onPick={() => pick(st)}
+                    />
                   ))}
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
+                </MenuGroup>
+              );
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -740,8 +828,18 @@ export function AssistantPanel() {
   const toolbar = (
     <div className="px-4 py-2.5 border-b border-line shrink-0 space-y-2">
       <div className={`flex gap-2 ${expanded ? "flex-row" : "flex-col"}`}>
-        <ContextSelect value={context} onChange={changeContext} label={ctxLabel} />
-        <WorkWithSelect value={workWith} label={workLabel} onChange={changeWorkWith} />
+        <ContextSelect
+          value={context}
+          onChange={changeContext}
+          label={ctxLabel}
+          here={location.stageLabel || location.pipelineStage || location.pageLabel || "Current page"}
+        />
+        <WorkWithSelect
+          value={workWith}
+          label={workLabel}
+          currentStageKey={location.stageId ? `workspace:${location.stageId}` : location.pipelineStage ? `intake:${location.pipelineStage}` : undefined}
+          onChange={changeWorkWith}
+        />
       </div>
       <button
         onClick={() => setDocsOpen((d) => !d)}
