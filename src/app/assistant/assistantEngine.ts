@@ -14,17 +14,29 @@ export const CONTEXTS: { id: ContextId; label: string; blurb: string }[] = [
   { id: "intake", label: "Case Intake Pipeline", blurb: "Collection, Analysis, Valuation, Case Ready" },
   { id: "workspace", label: "Case Workspace", blurb: "All nine workspace stages" },
   { id: "case", label: "Entire Case", blurb: "Every stage, document and finding" },
-  { id: "global", label: "Global", blurb: "General legal principles, no case data" },
+  { id: "global", label: "Global", blurb: "Research sources outside this case" },
 ];
 
-// The attorney can scope the AI to a whole pipeline, the entire case, general
-// legal knowledge, or one specific stage in either pipeline.
+// Global is not one scope but two research sources, neither of which reads the
+// case file. The attorney picks which one the assistant should reason from.
+export type GlobalSourceId = "precedent" | "public";
+
+export const GLOBAL_SOURCES: { id: GlobalSourceId; label: string; blurb: string }[] = [
+  { id: "precedent", label: "Precedent Cases", blurb: "Decided cases and how they were reasoned" },
+  { id: "public", label: "Public Database", blurb: "Public records, statutes and filings" },
+];
+
+export const globalSourceLabel = (id: GlobalSourceId): string =>
+  GLOBAL_SOURCES.find((g) => g.id === id)?.label ?? "Global";
+
+// The attorney can scope the AI to a whole pipeline, the entire case, a global
+// research source, or one specific stage in either pipeline.
 export type ContextSel =
   | { kind: "current" }
   | { kind: "intake" }
   | { kind: "workspace" }
   | { kind: "case" }
-  | { kind: "global" }
+  | { kind: "global"; source: GlobalSourceId }
   | { kind: "stage"; stage: WorkStageDef };
 
 export const CURRENT_CONTEXT: ContextSel = { kind: "current" };
@@ -34,7 +46,7 @@ export function contextLabel(sel: ContextSel, loc: AssistantLocation): string {
     case "intake": return "Case Intake Pipeline";
     case "workspace": return "Case Workspace";
     case "case": return "Entire Case";
-    case "global": return "Global";
+    case "global": return `${globalSourceLabel(sel.source)} · Global`;
     case "stage": return `${sel.stage.label} · ${sel.stage.pipeline === "intake" ? "Case Intake" : "Case Workspace"}`;
     default: {
       const here = loc.stageLabel || loc.pipelineStage || loc.pageLabel || "Current page";
@@ -52,6 +64,11 @@ export function effectiveScope(sel: ContextSel): ContextId {
     case "global": return "global";
     default: return "stage";
   }
+}
+
+// The research source behind a global selection, if one is selected.
+export function globalSource(sel: ContextSel): GlobalSourceId | undefined {
+  return sel.kind === "global" ? sel.source : undefined;
 }
 
 // A context pinned to one stage also pins the suggestions to it.
@@ -135,11 +152,25 @@ const CONTEXT_SUGGESTIONS: Record<ContextId, string[]> = {
   ],
 };
 
-export function suggestionsFor(ctx: ContextId, loc: AssistantLocation): string[] {
+const GLOBAL_SOURCE_SUGGESTIONS: Record<GlobalSourceId, string[]> = {
+  precedent: [
+    "Which precedents govern comparative negligence?",
+    "How have courts treated delayed cervical imaging?",
+    "Find decisions on commercial-vehicle signal violations.",
+  ],
+  public: [
+    "What do the public filings show for this carrier?",
+    "Which statutes govern signal violations here?",
+    "Search the public record for prior claims against the defendant.",
+  ],
+};
+
+export function suggestionsFor(ctx: ContextId, loc: AssistantLocation, source?: GlobalSourceId): string[] {
   if (ctx === "stage") {
     const byStage = loc.stageId ? STAGE_SUGGESTIONS[loc.stageId] : undefined;
     return byStage ?? CONTEXT_SUGGESTIONS.stage;
   }
+  if (ctx === "global" && source) return GLOBAL_SOURCE_SUGGESTIONS[source];
   return CONTEXT_SUGGESTIONS[ctx];
 }
 
@@ -267,7 +298,10 @@ function exposures(loc: AssistantLocation): AssistantAnswer {
   };
 }
 
-function globalAnswer(q: string): AssistantAnswer {
+function globalAnswer(q: string, source: GlobalSourceId): AssistantAnswer {
+  const from = source === "precedent"
+    ? "Reading precedent cases only — no data from this case file."
+    : "Reading the public database only — no data from this case file.";
   if (/comparative negligence|contributory/i.test(q)) {
     return {
       headline: "Comparative negligence apportions responsibility rather than barring recovery outright.",
@@ -278,14 +312,16 @@ function globalAnswer(q: string): AssistantAnswer {
         "Apportionment is generally a question for the finder of fact, informed by the evidence of each party conduct.",
       ],
       citations: [],
-      caveat: "General principles only. Global scope uses no case data, and the governing rule depends on the jurisdiction.",
+      caveat: `General principles only; the governing rule depends on the jurisdiction. ${from}`,
     };
   }
   return {
-    headline: "Ask about a doctrine, a standard of proof, or a procedural rule and I will set out the general position.",
+    headline: source === "precedent"
+      ? "Ask about a doctrine, a line of authority or how a question has been decided, and I will set out the position from precedent."
+      : "Ask about a statute, a filing or a public record, and I will set out what the public database holds.",
     points: [],
     citations: [],
-    caveat: "General information, not advice on this matter. Global scope uses no case data.",
+    caveat: `General information, not advice on this matter. ${from}`,
   };
 }
 
@@ -311,8 +347,8 @@ function stageAnswer(loc: AssistantLocation, q: string): AssistantAnswer {
 }
 
 // Route a question to an answer within the chosen scope.
-export function answer(q: string, ctx: ContextId, loc: AssistantLocation): AssistantAnswer {
-  if (ctx === "global") return globalAnswer(q);
+export function answer(q: string, ctx: ContextId, loc: AssistantLocation, source?: GlobalSourceId): AssistantAnswer {
+  if (ctx === "global") return globalAnswer(q, source ?? "precedent");
 
   if (/contradict|conflict|discrepan|inconsisten/i.test(q)) return contradictions();
   if (/gap|missing|outstanding/i.test(q)) return evidenceGaps();
@@ -410,7 +446,7 @@ export function contextChangeNotice(sel: ContextSel, loc: AssistantLocation): As
   const label = contextLabel(sel, loc);
   const line =
     sel.kind === "case" ? "You are now chatting with the Entire Case."
-    : sel.kind === "global" ? "You are now chatting with Global context."
+    : sel.kind === "global" ? `You are now researching ${globalSourceLabel(sel.source)} — no case data is used.`
     : sel.kind === "intake" ? "You are now chatting with the Case Intake Pipeline."
     : sel.kind === "workspace" ? "You are now chatting with the Case Workspace."
     : `You are now chatting with ${label}.`;

@@ -1,7 +1,7 @@
 import { EVIDENCE_INTEL } from "../workspace/evidenceData";
 import {
   fileName, suggestionsFor, STAGE_SUGGESTIONS,
-  type AssistantAnswer, type ContextId, type WorkStageDef,
+  type AssistantAnswer, type ContextId, type GlobalSourceId, type WorkStageDef,
 } from "./assistantEngine";
 import type { AssistantLocation } from "./AssistantContext";
 
@@ -179,14 +179,19 @@ const INTAKE_SUGGESTIONS: Record<string, string[]> = {
 };
 
 // A chosen working stage drives the suggestions; otherwise the scope does.
-export function suggestionsForWork(ctx: ContextId, loc: AssistantLocation, stage: WorkStageDef | null): string[] {
+export function suggestionsForWork(
+  ctx: ContextId,
+  loc: AssistantLocation,
+  stage: WorkStageDef | null,
+  source?: GlobalSourceId,
+): string[] {
   if (stage) {
-    if (stage.pipeline === "intake") return INTAKE_SUGGESTIONS[stage.id] ?? suggestionsFor(ctx, loc);
+    if (stage.pipeline === "intake") return INTAKE_SUGGESTIONS[stage.id] ?? suggestionsFor(ctx, loc, source);
     const byStage = STAGE_SUGGESTIONS[stage.id];
     if (byStage) return byStage;
   }
   if (ctx === "stage" && !loc.stageId && loc.pipelineStage && INTAKE_SUGGESTIONS[loc.pipelineStage]) {
     return INTAKE_SUGGESTIONS[loc.pipelineStage];
   }
-  return suggestionsFor(ctx, loc);
+  return suggestionsFor(ctx, loc, source);
 }

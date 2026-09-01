@@ -9,7 +9,8 @@ import {
 } from "./AssistantContext";
 import {
   contextLabel, answer, contextChangeNotice, workStageLabel, effectiveScope, pinnedStage,
-  documentsForStage, STAGE_TREE, type ContextSel, type AssistantAnswer, type WorkStageDef,
+  documentsForStage, globalSource, STAGE_TREE, GLOBAL_SOURCES,
+  type ContextSel, type AssistantAnswer, type WorkStageDef,
 } from "./assistantEngine";
 import { DOC_ACTIONS, documentAction, proposalFor, suggestionsForWork, type DocActionId } from "./documentActions";
 import { ProposedEvent, ProposedEdit } from "./ChronologyProposal";
@@ -211,15 +212,16 @@ function Thread({
 // Both selectors are simple navigation trees: pipelines stay collapsed until
 // the attorney opens one, so neither menu takes over the drawer.
 
-// A selectable option inside a category. Deliberately lighter than the parent
-// heading so the menu reads as category → option at a glance.
+// Level 3 — a selectable context. Deliberately lighter than the headings above
+// it so the menu reads heading → category → context at a glance. `deep` indents
+// it one step further, for a context sitting two levels down.
 function MenuRow({
-  on, text, onPick,
-}: { on: boolean; text: string; onPick: () => void }) {
+  on, text, onPick, deep = false,
+}: { on: boolean; text: string; onPick: () => void; deep?: boolean }) {
   return (
     <button
       onClick={onPick}
-      className={`w-full text-left pl-7 pr-3 py-1.5 rounded-md text-[13px] transition-colors ${
+      className={`w-full text-left ${deep ? "pl-10" : "pl-7"} pr-3 py-1.5 rounded-md text-[13px] transition-colors ${
         on ? "bg-tint text-deep font-medium" : "text-[#5B6B78] hover:bg-wash hover:text-ink"
       }`}
     >
@@ -228,7 +230,7 @@ function MenuRow({
   );
 }
 
-// A category heading. Stronger and darker than its options, with the chevron
+// Level 1 — a main heading. The strongest text in the menu, with the chevron
 // right-aligned: right = collapsed, down = expanded.
 function MenuGroup({
   label, expanded, onToggle, children,
@@ -245,6 +247,47 @@ function MenuGroup({
           : <ChevronRight className="w-3.5 h-3.5 text-[#5B6B78] shrink-0" strokeWidth={1.75} />}
       </button>
       {expanded && <div>{children}</div>}
+    </div>
+  );
+}
+
+// Level 2 — a category inside a main heading. Indented and lighter than the
+// heading above it, so the two never read as the same rank.
+function MenuSubGroup({
+  label, expanded, onToggle, children,
+}: { label: string; expanded: boolean; onToggle: () => void; children: React.ReactNode }) {
+  return (
+    <div className="mt-1 first:mt-0.5">
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center justify-between gap-2 pl-6 pr-3 py-1.5 rounded-md text-left hover:bg-wash transition-colors"
+      >
+        <span className="text-[10.5px] font-semibold uppercase tracking-[0.07em] text-[#5B6B78]">{label}</span>
+        {expanded
+          ? <ChevronDown className="w-3 h-3 text-[#8FA3AF] shrink-0" strokeWidth={1.75} />
+          : <ChevronRight className="w-3 h-3 text-[#8FA3AF] shrink-0" strokeWidth={1.75} />}
+      </button>
+      {expanded && <div>{children}</div>}
+    </div>
+  );
+}
+
+// Level 1 that is itself the context — Entire Case has nothing beneath it, so
+// it carries heading weight and is picked directly rather than expanded.
+function MenuHeadingRow({
+  on, label, onPick,
+}: { on: boolean; label: string; onPick: () => void }) {
+  return (
+    <div className="mt-1.5 first:mt-0">
+      <button
+        onClick={onPick}
+        className={`w-full flex items-center justify-between gap-2 px-3 py-1.5 rounded-md text-left transition-colors ${
+          on ? "bg-tint" : "hover:bg-wash"
+        }`}
+      >
+        <span className={`text-[11px] font-semibold uppercase tracking-[0.06em] ${on ? "text-deep" : "text-ink"}`}>{label}</span>
+        {on && <Check className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={2} />}
+      </button>
     </div>
   );
 }
@@ -270,9 +313,19 @@ function ContextSelect({
   /** Where the attorney actually is — independent of the selected context. */
   here: string;
 }) {
+  // Two levels of disclosure, each an accordion: one main heading open at a
+  // time, and inside Case one pipeline at a time.
   const [open, setOpen] = useState(false);
-  const [expanded, setExpandedGroup] = useState<string | null>(null);
-  const pick = (c: ContextSel) => { onChange(c); setOpen(false); setExpandedGroup(null); };
+  const [heading, setHeading] = useState<"case" | "global" | null>(null);
+  const [pipeline, setPipeline] = useState<string | null>(null);
+  const closeMenu = () => { setOpen(false); setHeading(null); setPipeline(null); };
+  const pick = (c: ContextSel) => { onChange(c); closeMenu(); };
+  const toggleHeading = (h: "case" | "global") =>
+    setHeading((prev) => {
+      if (prev === h) { setPipeline(null); return null; }
+      setPipeline(null);
+      return h;
+    });
 
   return (
     <div className="relative min-w-0 flex-1">
@@ -287,44 +340,61 @@ function ContextSelect({
       </button>
       {open && (
         <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="fixed inset-0 z-10" onClick={closeMenu} />
           <div className="absolute left-0 right-0 mt-1.5 z-20 max-h-[320px] overflow-y-auto rounded-lg border border-line bg-white shadow-lg p-1">
+            {/* Where the attorney actually is. Kept out of the Case hierarchy
+                because it follows the dashboard rather than being chosen. */}
             <MenuSection label="Current Stage">
               <MenuRow on={value.kind === "current"} text={here} onPick={() => pick({ kind: "current" })} />
             </MenuSection>
 
-            {STAGE_TREE.map((group) => (
-              <MenuGroup
-                key={group.pipeline}
-                label={group.label}
-                expanded={expanded === group.pipeline}
-                onToggle={() => setExpandedGroup((e) => (e === group.pipeline ? null : group.pipeline))}
-              >
-                <MenuRow
-                  on={value.kind === group.pipeline}
-                  text={`All of ${group.label}`}
-                  onPick={() => pick({ kind: group.pipeline })}
-                />
-                {group.stages.map((st) => (
+            {/* Case — one parent over both pipelines, so the menu reads
+                heading → pipeline → stage all the way down. */}
+            <MenuGroup label="Case" expanded={heading === "case"} onToggle={() => toggleHeading("case")}>
+              {STAGE_TREE.map((group) => (
+                <MenuSubGroup
+                  key={group.pipeline}
+                  label={group.label}
+                  expanded={pipeline === group.pipeline}
+                  onToggle={() => setPipeline((p) => (p === group.pipeline ? null : group.pipeline))}
+                >
                   <MenuRow
-                    key={st.key}
-                    on={value.kind === "stage" && value.stage.key === st.key}
-                    text={st.label}
-                    onPick={() => pick({ kind: "stage", stage: st })}
+                    deep
+                    on={value.kind === group.pipeline}
+                    text={`All of ${group.label}`}
+                    onPick={() => pick({ kind: group.pipeline })}
                   />
-                ))}
-              </MenuGroup>
-            ))}
+                  {group.stages.map((st) => (
+                    <MenuRow
+                      key={st.key}
+                      deep
+                      on={value.kind === "stage" && value.stage.key === st.key}
+                      text={st.label}
+                      onPick={() => pick({ kind: "stage", stage: st })}
+                    />
+                  ))}
+                </MenuSubGroup>
+              ))}
+            </MenuGroup>
 
-            {/* The two case-wide scopes share one category, so the menu reads
-                as category → specific context throughout. */}
-            <MenuGroup
-              label="Whole Case"
-              expanded={expanded === "whole"}
-              onToggle={() => setExpandedGroup((e) => (e === "whole" ? null : "whole"))}
-            >
-              <MenuRow on={value.kind === "case"} text="Entire Case" onPick={() => pick({ kind: "case" })} />
-              <MenuRow on={value.kind === "global"} text="Global" onPick={() => pick({ kind: "global" })} />
+            {/* Both pipelines at once. Nothing sits beneath it, so it is a
+                heading the attorney picks rather than one they open. */}
+            <MenuHeadingRow
+              on={value.kind === "case"}
+              label="Entire Case"
+              onPick={() => pick({ kind: "case" })}
+            />
+
+            {/* Research sources outside this case file. */}
+            <MenuGroup label="Global" expanded={heading === "global"} onToggle={() => toggleHeading("global")}>
+              {GLOBAL_SOURCES.map((src) => (
+                <MenuRow
+                  key={src.id}
+                  on={value.kind === "global" && value.source === src.id}
+                  text={src.label}
+                  onPick={() => pick({ kind: "global", source: src.id })}
+                />
+              ))}
             </MenuGroup>
           </div>
         </>
@@ -531,7 +601,7 @@ export function AssistantPanel() {
   const ctxLabel = contextLabel(context, location);
   const workLabel = workStageLabel(workWith, location);
   const stageDocs = documentsForStage(workWith, documents, findings);
-  const suggestions = suggestionsForWork(effectiveScope(context), location, workWith ?? pinnedStage(context));
+  const suggestions = suggestionsForWork(effectiveScope(context), location, workWith ?? pinnedStage(context), globalSource(context));
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -693,7 +763,7 @@ export function AssistantPanel() {
         }
       }
 
-      push({ id: `a-${id}`, role: "assistant", answer: answer(text, effectiveScope(context), location), context: ctxLabel });
+      push({ id: `a-${id}`, role: "assistant", answer: answer(text, effectiveScope(context), location, globalSource(context)), context: ctxLabel });
       setThinking(false);
     }, 700);
   };
