@@ -2,6 +2,9 @@ import { createContext, useContext, useEffect, useMemo, useState, ReactNode } fr
 import type { AnalysisFinding, CaseDocument } from "../types/case";
 import type { ContextSel, AssistantAnswer } from "./assistantEngine";
 import type { ChronCandidate, ChronEdit } from "./chronologyActions";
+import type {
+  DamageAddProposal, DamageDeleteProposal, DamageEditProposal, DamageMoveProposal, DamageSuggestion,
+} from "./damagesActions";
 
 // ── Assistant store ───────────────────────────────────────────────────────────
 // ONE assistant. The launcher lives in the top bar and the panel lives in the
@@ -44,7 +47,25 @@ export interface Message {
   chronoAdds?: { candidate: ChronCandidate; state: "pending" | "added"; source: "attorney" | "ai"; note?: string }[];
   /** A chronology edit the assistant proposes. */
   chronoEdit?: { edit: ChronEdit; state: "pending" | "applied" };
+
+  // ── Damages ────────────────────────────────────────────────────────────────
+  // Each is a proposal, never a change. The state moves only when the attorney
+  // presses the confirm button on the card itself.
+  /** A change to a damage already on file. */
+  damageEdit?: { proposal: DamageEditProposal; state: DamageState };
+  /** A damage the assistant would create. */
+  damageAdd?: { proposal: DamageAddProposal; state: DamageState };
+  /** A damage the assistant would delete — destructive, so always confirmed. */
+  damageDelete?: { proposal: DamageDeleteProposal; state: DamageState };
+  /** A damage the assistant would move between buckets. */
+  damageMove?: { proposal: DamageMoveProposal; state: DamageState };
+  /** A damage the records may support. An offer to review, not a proposal. */
+  damageSuggest?: { suggestion: DamageSuggestion; state: "open" | "reviewing" | "dismissed" }[];
+  /** Provenance footer on a confirmation — "AI Modified · Damages Analysis". */
+  stamp?: { provenance: string; where: string };
 }
+
+export type DamageState = "pending" | "applied" | "cancelled";
 
 export interface Conversation {
   id: string;

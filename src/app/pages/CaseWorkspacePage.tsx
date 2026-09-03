@@ -12,6 +12,7 @@ import { StageEvidenceSection, ViewEvidenceButton } from "../workspace/StageEvid
 import { EvidenceStageTab } from "../workspace/EvidenceStage";
 import { useReportAssistantStage } from "../assistant/AssistantContext";
 import { useChronologyOptional } from "../chronology/ChronologyContext";
+import { useDamagesOptional } from "../damages/DamagesContext";
 import { DocumentWorkspaceModal } from "../components/DocumentWorkspace";
 import { DemandSpacePage } from "./DemandSpacePage";
 import { DemandPackageEditorPage } from "./DemandPackageEditorPage";
@@ -89,6 +90,7 @@ export function CaseWorkspacePage({ caseData, analysisFindings = [], documents =
   // consume chronology evidence, so an approved AI event is immediately usable
   // everywhere the timeline is read.
   const chronoStore = useChronologyOptional();
+  const damages = useDamagesOptional();
   const chronoEvents = [
     ...userChronology.medical,
     ...userChronology.event,
@@ -171,7 +173,12 @@ export function CaseWorkspacePage({ caseData, analysisFindings = [], documents =
     setDemandPackages((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
   };
 
-  const nonEconomic = BASE_ECONOMIC * MULTIPLIER;
+  // Economic damages are read from the damages store, not from the baseline
+  // constant, so every tab that quotes a total reflects the record as it stands
+  // after an edit — the baseline is only the fallback outside the provider.
+  const economicTotal = damages?.economicTotal ?? BASE_ECONOMIC;
+  const nonEconomicItems = damages?.nonEconomicItemsTotal ?? 0;
+  const nonEconomic = economicTotal * MULTIPLIER + nonEconomicItems;
   const model: WorkspaceModel = {
     caseName: caseData?.caseName ?? "Estate of Miller vs Logistics Co.",
     caseId: caseData?.id ?? caseData?.caseId ?? "CASE-94101",
@@ -182,10 +189,10 @@ export function CaseWorkspacePage({ caseData, analysisFindings = [], documents =
     jurisdiction: caseData?.jurisdiction ?? "Cook County, IL",
     incidentDate: caseData?.dateOfIncident ?? "Feb 14, 2026",
     status: "Ready for Review",
-    recommendedSettlement: BASE_ECONOMIC + nonEconomic,
+    recommendedSettlement: economicTotal + nonEconomic,
     confidence: 94,
     multiplier: MULTIPLIER,
-    economicTotal: BASE_ECONOMIC,
+    economicTotal,
     nonEconomicTotal: nonEconomic,
     estimatedLow: caseData?.estimatedLow ?? 968700,
     estimatedHigh: caseData?.estimatedHigh ?? 1372325,

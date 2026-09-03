@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import {
   useAssistant, DRAWER_MIN, DRAWER_DEFAULT, drawerMax, expandThreshold,
-  type Message, type WorkStage,
+  type Message, type WorkStage, type DamageState,
 } from "./AssistantContext";
 import {
   contextLabel, answer, contextChangeNotice, workStageLabel, effectiveScope, pinnedStage,
@@ -19,7 +19,20 @@ import {
   type ChronCandidate, type ChronEdit,
 } from "./chronologyActions";
 import { useChronologyOptional, versionStamp, type ChronVersion } from "../chronology/ChronologyContext";
-import { CHRONOLOGY_TITLES, CURRENT_USER as CURRENT_ATTORNEY } from "../workspace/WorkspaceTabs";
+import {
+  useDamagesOptional, aiActor, formatDamageUSD, DAMAGE_FIELD_LABEL,
+  type DamageItem, type FieldChange,
+} from "../damages/DamagesContext";
+import {
+  detectDamageIntent, buildEditProposal, buildAddProposal, buildDeleteProposal, buildMoveProposal,
+  findDamage, namesDamage, missingDamages, figureFromDocuments, proposalFromSuggestion,
+  type DamageAddProposal, type DamageDeleteProposal, type DamageEditProposal,
+  type DamageMoveProposal, type DamageSuggestion,
+} from "./damagesActions";
+import {
+  ProposedDamageAdd, ProposedDamageDelete, ProposedDamageEdit, ProposedDamageMove, SuggestedDamage,
+} from "./DamageProposal";
+import { CHRONOLOGY_TITLES, CURRENT_USER as CURRENT_ATTORNEY, documentAmount } from "../workspace/WorkspaceTabs";
 
 // ── AI Assistant ──────────────────────────────────────────────────────────────
 // The launcher sits in the top bar; the panel is part of the shell layout, so
@@ -56,10 +69,13 @@ export function AssistantMain({ children }: { children: React.ReactNode }) {
 
 // ── Message rendering ─────────────────────────────────────────────────────────
 
-function AnswerBlock({ a }: { a: AssistantAnswer }) {
+function AnswerBlock({ a, confirmed = false }: { a: AssistantAnswer; confirmed?: boolean }) {
   return (
     <div className="space-y-3">
-      <p className="body-text leading-relaxed">{a.headline}</p>
+      <p className="body-text leading-relaxed">
+        {confirmed && <Check className="w-4 h-4 text-[#15803D] inline-block mr-1.5 -mt-0.5" strokeWidth={2.25} />}
+        {a.headline}
+      </p>
       {a.points.length > 0 && (
         <ul className="space-y-1.5">
           {a.points.map((p, i) => (
@@ -138,12 +154,55 @@ function Proposal({ m, onApply }: { m: Message; onApply: (id: string) => void })
   );
 }
 
+// When an instruction names something the record does not hold, or leaves out
+// what the change should be, the assistant asks rather than guessing. Guessing
+// here would mean editing the wrong damage.
+function damageAskBack(
+  error: "no-damage" | "no-field" | "no-value",
+  target: string | undefined,
+  items: DamageItem[],
+): AssistantAnswer {
+  const names = items.map((i) => i.label);
+  if (error === "no-damage") {
+    return {
+      headline: target
+        ? `I could not find a damage matching “${target}” on this case.`
+        : "Tell me which damage you mean.",
+      points: names.length > 0 ? [`On file: ${names.join(", ")}.`] : [],
+      citations: [],
+    };
+  }
+  if (error === "no-field") {
+    return {
+      headline: `What should I change on ${target} — the amount, the description, the damage type, the supporting information, the supporting evidence, or a note?`,
+      points: [], citations: [],
+    };
+  }
+  return {
+    headline: `What should ${target} be changed to?`,
+    points: [], citations: [],
+  };
+}
+
+// Every damage action the thread can hand back to the panel. Grouped so the
+// signature stays readable as the set grows.
+export interface DamageHandlers {
+  onDamageEdit: (msgId: string, p: DamageEditProposal) => void;
+  onDamageAdd: (msgId: string, p: DamageAddProposal) => void;
+  onDamageDelete: (msgId: string, p: DamageDeleteProposal) => void;
+  onDamageMove: (msgId: string, p: DamageMoveProposal) => void;
+  onDamageCancel: (msgId: string, kind: "edit" | "add" | "delete" | "move") => void;
+  onReviewSuggestion: (msgId: string, index: number, s: DamageSuggestion) => void;
+  onDismissSuggestion: (msgId: string, index: number) => void;
+}
+
 function Thread({
-  messages, thinking, onApply, onAddEvent, onApplyEdit,
+  messages, thinking, onApply, onAddEvent, onApplyEdit, damage,
 }: {
   messages: Message[]; thinking: boolean; onApply: (id: string) => void;
   onAddEvent: (msgId: string, index: number, c: ChronCandidate) => void;
   onApplyEdit: (msgId: string, e: ChronEdit) => void;
+  damage: DamageHandlers;
 }) {
   return (
     <div className="space-y-5">
@@ -176,7 +235,7 @@ function Thread({
               {m.role === "system" && (
                 <div className="eyebrow mb-1.5">{m.noticeLabel ?? "Context changed"}</div>
               )}
-              <AnswerBlock a={m.answer!} />
+              <AnswerBlock a={m.answer!} confirmed={!!m.stamp} />
               {m.proposal && <Proposal m={m} onApply={onApply} />}
               {m.chronoAdds?.map((p, i) => (
                 <ProposedEvent
@@ -189,6 +248,55 @@ function Thread({
               ))}
               {m.chronoEdit && (
                 <ProposedEdit edit={m.chronoEdit.edit} state={m.chronoEdit.state} onApply={(e) => onApplyEdit(m.id, e)} />
+              )}
+              {m.damageEdit && (
+                <ProposedDamageEdit
+                  proposal={m.damageEdit.proposal}
+                  state={m.damageEdit.state}
+                  onApply={(p) => damage.onDamageEdit(m.id, p)}
+                  onCancel={() => damage.onDamageCancel(m.id, "edit")}
+                />
+              )}
+              {m.damageAdd && (
+                <ProposedDamageAdd
+                  proposal={m.damageAdd.proposal}
+                  state={m.damageAdd.state}
+                  onAdd={(p) => damage.onDamageAdd(m.id, p)}
+                  onCancel={() => damage.onDamageCancel(m.id, "add")}
+                />
+              )}
+              {m.damageDelete && (
+                <ProposedDamageDelete
+                  proposal={m.damageDelete.proposal}
+                  state={m.damageDelete.state}
+                  onDelete={(p) => damage.onDamageDelete(m.id, p)}
+                  onCancel={() => damage.onDamageCancel(m.id, "delete")}
+                />
+              )}
+              {m.damageMove && (
+                <ProposedDamageMove
+                  proposal={m.damageMove.proposal}
+                  state={m.damageMove.state}
+                  onMove={(p) => damage.onDamageMove(m.id, p)}
+                  onCancel={() => damage.onDamageCancel(m.id, "move")}
+                />
+              )}
+              {m.damageSuggest?.map((sg, i) => (
+                <SuggestedDamage
+                  key={sg.suggestion.label}
+                  suggestion={sg.suggestion}
+                  state={sg.state}
+                  onReview={(x) => damage.onReviewSuggestion(m.id, i, x)}
+                  onDismiss={() => damage.onDismissSuggestion(m.id, i)}
+                />
+              ))}
+              {/* Provenance footer on a confirmation — how the record changed
+                  and where, in the same words the stage uses. */}
+              {m.stamp && (
+                <div className="flex items-center gap-1.5 flex-wrap mt-2">
+                  <span className="pill pill-neutral"><Sparkles className="w-3.5 h-3.5" strokeWidth={1.75} /> {m.stamp.provenance}</span>
+                  <span className="text-[11px] text-[#8A98A3]">{m.stamp.where}</span>
+                </div>
               )}
             </div>
           </div>
@@ -591,6 +699,7 @@ export function AssistantPanel() {
   } = useAssistant();
 
   const chronology = useChronologyOptional();
+  const damages = useDamagesOptional();
   const [thinking, setThinking] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [docsOpen, setDocsOpen] = useState(false);
@@ -602,6 +711,24 @@ export function AssistantPanel() {
   const workLabel = workStageLabel(workWith, location);
   const stageDocs = documentsForStage(workWith, documents, findings);
   const suggestions = suggestionsForWork(effectiveScope(context), location, workWith ?? pinnedStage(context), globalSource(context));
+
+  // ── What the assistant is actively working with ────────────────────────────
+  // Work With wins, then a context pinned to one stage, then where the attorney
+  // actually is. This is what decides whether the damage record is in reach —
+  // never the page on screen, so a cross-stage selection works without
+  // navigating anywhere.
+  const activeStage = workWith ?? pinnedStage(context);
+  const workingStageId =
+    activeStage?.pipeline === "workspace" ? activeStage.id
+    : activeStage ? undefined
+    : location.stageId;
+  // Damages Analysis is reachable when it is the working stage, or when the
+  // reasoning scope is case-wide and no other stage has been singled out.
+  const damagesReachable = !!damages && (
+    workingStageId === "economic" ||
+    (!activeStage && (effectiveScope(context) === "case" || effectiveScope(context) === "workspace"))
+  );
+  const damageItems = damages?.items ?? [];
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -687,11 +814,186 @@ export function AssistantPanel() {
     setThinking(true);
     setShowHistory(false);
 
+    // ── Damages first, when the damage record is what we are working with ────
+    // A message is about the damages when it names one or uses the vocabulary
+    // of the stage. A message about the timeline is left to the chronology
+    // path below, so the two never contend for the same instruction.
+    const aboutChronology = /\b(chronolog|timeline)\b/i.test(text);
+    const aboutDamages = !aboutChronology && (
+      namesDamage(text, damageItems) ||
+      /\b(damage|damages|expense|expenses|cost|costs|wage|wages|bucket|subtotal|economic)\b/i.test(text) ||
+      // A plain instruction carrying a money amount, while the damage record is
+      // what we are working with, is about the damages — "Add $5,000 for home
+      // modifications" names no damage and uses none of the vocabulary above.
+      (damagesReachable && /\$\s*\d/.test(text) && /\b(add|create|change|update|set|delete|remove|move)\b/i.test(text))
+    );
+    const damageIntent = aboutDamages ? detectDamageIntent(text) : { kind: "none" as const };
+
     // A request to change the timeline gets a proposal; anything else is an
     // ordinary answer with no action card.
-    const intent = chronology ? detectIntent(text) : { kind: "none" as const };
+    const intent = chronology && !aboutDamages ? detectIntent(text) : { kind: "none" as const };
 
     setTimeout(() => {
+      // ── Damage actions ───────────────────────────────────────────────────
+      // Every branch ends in a proposal or a question. None of them writes.
+      if (damageIntent.kind !== "none") {
+        if (!damagesReachable || !damages) {
+          push({
+            id: `a-${id}`, role: "assistant", context: ctxLabel,
+            answer: {
+              headline: "I can change the damage record once Damages Analysis is what I am working with.",
+              points: ["Set Work With to Case Workspace → Damages Analysis. The dashboard stays where it is."],
+              citations: [],
+            },
+          });
+          setThinking(false);
+          return;
+        }
+
+        if (damageIntent.kind === "edit") {
+          const item = findDamage(damageIntent.target, damages.items);
+          // Documents selected and no figure given: work the figure out from
+          // those documents. Reading them proposes; it never applies.
+          const wantsDocs = selectedDocs.length > 0 && /\bdocument|\bthese\b|\bselected\b|based on/i.test(text);
+          if (item && damageIntent.amount === null && wantsDocs) {
+            const fig = figureFromDocuments(item, selectedDocs, documentAmount);
+            if (!fig) {
+              push({
+                id: `a-${id}`, role: "assistant", context: ctxLabel,
+                answer: {
+                  headline: `None of the selected documents carries an itemised amount, so I cannot work ${item.label} out from them.`,
+                  points: [], citations: selectedDocs,
+                },
+              });
+              setThinking(false);
+              return;
+            }
+            if (fig.unchanged) {
+              push({
+                id: `a-${id}`, role: "assistant", context: ctxLabel,
+                answer: {
+                  headline: `The selected documents come to ${formatDamageUSD(fig.proposed)}, which is the ${item.label} figure already on file. I am not proposing a change.`,
+                  points: fig.lines.map((l) => `${l.doc} — ${formatDamageUSD(l.amount)}.`),
+                  citations: fig.lines.map((l) => l.doc),
+                },
+              });
+              setThinking(false);
+              return;
+            }
+            push({
+              id: `a-${id}`, role: "assistant", context: ctxLabel,
+              answer: {
+                headline: `Based on the selected documents, I calculate ${item.label} at ${formatDamageUSD(fig.proposed)}.`,
+                points: [
+                  ...fig.lines.map((l) =>
+                    `${l.doc} — ${formatDamageUSD(l.amount)}${l.counted ? "." : ", not currently cited against this damage."}`),
+                  `Current figure on file: ${formatDamageUSD(item.amount)}.`,
+                ],
+                citations: [],
+                // The attorney has to be able to see that a narrow selection
+                // produces a narrow figure, or a subtotal looks like a correction.
+                caveat: fig.lines.length < item.docCount
+                  ? `Worked out from the ${fig.lines.length} selected document${fig.lines.length === 1 ? "" : "s"} only — this damage cites ${item.docCount}. Nothing changes until you apply it.`
+                  : "Worked out from the selected documents only. Nothing changes until you apply it.",
+              },
+              damageEdit: {
+                proposal: {
+                  id: item.id, label: item.label, instruction: text,
+                  field: "amount", fieldLabel: DAMAGE_FIELD_LABEL.amount,
+                  current: formatDamageUSD(item.amount), proposed: formatDamageUSD(fig.proposed),
+                  amount: fig.proposed,
+                  reason: "Recalculated from the documents you selected.",
+                  sources: fig.lines.map((l) => l.doc),
+                },
+                state: "pending",
+              },
+            });
+            setThinking(false);
+            return;
+          }
+
+          const built = buildEditProposal(damageIntent, damages.items, text);
+          if ("error" in built) {
+            push({
+              id: `a-${id}`, role: "assistant", context: ctxLabel,
+              answer: damageAskBack(built.error, built.target, damages.items),
+            });
+            setThinking(false);
+            return;
+          }
+          push({
+            id: `a-${id}`, role: "assistant", context: ctxLabel,
+            answer: { headline: `Here is the change I would make to ${built.label}.`, points: [], citations: [] },
+            damageEdit: { proposal: built, state: "pending" },
+          });
+          setThinking(false);
+          return;
+        }
+
+        if (damageIntent.kind === "add") {
+          const built = buildAddProposal(damageIntent, damages.items, text);
+          if ("error" in built) {
+            push({
+              id: `a-${id}`, role: "assistant", context: ctxLabel,
+              answer: built.error === "no-amount"
+                ? { headline: `How much should I record for ${built.label}?`, points: [], citations: [] }
+                : { headline: "Tell me what the damage is and how much it comes to, and I will prepare it.", points: [], citations: [] },
+            });
+            setThinking(false);
+            return;
+          }
+          push({
+            id: `a-${id}`, role: "assistant", context: ctxLabel,
+            answer: { headline: `I can add that to ${built.bucketLabel}. Nothing is created until you confirm.`, points: [], citations: [] },
+            damageAdd: { proposal: built, state: "pending" },
+          });
+          setThinking(false);
+          return;
+        }
+
+        if (damageIntent.kind === "delete") {
+          const built = buildDeleteProposal(damageIntent, damages.items, text);
+          if ("error" in built) {
+            push({
+              id: `a-${id}`, role: "assistant", context: ctxLabel,
+              answer: damageAskBack("no-damage", built.target, damages.items),
+            });
+            setThinking(false);
+            return;
+          }
+          push({
+            id: `a-${id}`, role: "assistant", context: ctxLabel,
+            answer: { headline: `Deleting a damage cannot be undone, so please confirm.`, points: [], citations: [] },
+            damageDelete: { proposal: built, state: "pending" },
+          });
+          setThinking(false);
+          return;
+        }
+
+        if (damageIntent.kind === "move") {
+          const built = buildMoveProposal(damageIntent, damages.items, text);
+          if ("error" in built) {
+            push({
+              id: `a-${id}`, role: "assistant", context: ctxLabel,
+              answer: built.error === "no-bucket"
+                ? { headline: `Which bucket should ${built.target} move to — Economic or Non-Economic Damages?`, points: [], citations: [] }
+                : built.error === "same-bucket"
+                ? { headline: `${built.target} is already there, so there is nothing to move.`, points: [], citations: [] }
+                : damageAskBack("no-damage", built.target, damages.items),
+            });
+            setThinking(false);
+            return;
+          }
+          push({
+            id: `a-${id}`, role: "assistant", context: ctxLabel,
+            answer: { headline: `Here is the move I would make.`, points: [], citations: [] },
+            damageMove: { proposal: built, state: "pending" },
+          });
+          setThinking(false);
+          return;
+        }
+      }
+
       const timeline = intent.kind === "create" || intent.kind === "find-missing"
         ? (intent.timeline === "medical" ? "Medical Chronology" : "Event Chronology")
         : "";
@@ -763,7 +1065,17 @@ export function AssistantPanel() {
         }
       }
 
-      push({ id: `a-${id}`, role: "assistant", answer: answer(text, effectiveScope(context), location, globalSource(context)), context: ctxLabel });
+      // An ordinary answer. Where the question touches on the completeness of
+      // the damages, the assistant may also surface a damage the records seem
+      // to support — as an offer to review, never as a change.
+      const offer = damagesReachable && damages && /\b(damage|damages|expense|expenses|cost|costs|missing|gap|gaps|complete|outstanding|overlook)\b/i.test(text)
+        ? missingDamages(damages.items).slice(0, 1)
+        : [];
+      push({
+        id: `a-${id}`, role: "assistant", context: ctxLabel,
+        answer: answer(text, effectiveScope(context), location, globalSource(context)),
+        damageSuggest: offer.length > 0 ? offer.map((sg) => ({ suggestion: sg, state: "open" as const })) : undefined,
+      });
       setThinking(false);
     }, 700);
   };
@@ -826,6 +1138,153 @@ export function AssistantPanel() {
         },
       ),
     );
+  };
+
+  // ── Applying a damage action ───────────────────────────────────────────────
+  // One shape for all four: write to the store, mark the card settled, and add
+  // one short confirmation carrying the provenance. The dashboard picks the
+  // change up from the store — nothing here navigates.
+
+  const settle = (msgId: string, kind: "edit" | "add" | "delete" | "move", state: DamageState, confirmation?: Message) =>
+    setConversations((prev) =>
+      prev.map((conv) =>
+        conv.id !== active.id ? conv : {
+          ...conv,
+          messages: [
+            ...conv.messages.map((m) => {
+              if (m.id !== msgId) return m;
+              if (kind === "edit" && m.damageEdit) return { ...m, damageEdit: { ...m.damageEdit, state } };
+              if (kind === "add" && m.damageAdd) return { ...m, damageAdd: { ...m.damageAdd, state } };
+              if (kind === "delete" && m.damageDelete) return { ...m, damageDelete: { ...m.damageDelete, state } };
+              if (kind === "move" && m.damageMove) return { ...m, damageMove: { ...m.damageMove, state } };
+              return m;
+            }),
+            ...(confirmation ? [confirmation] : []),
+          ],
+        },
+      ),
+    );
+
+  const confirm = (headline: string, provenance: string): Message => ({
+    id: `a-${Math.round(performance.now())}-${Math.random().toString(36).slice(2, 6)}`,
+    role: "assistant", context: ctxLabel,
+    answer: { headline, points: [], citations: [] },
+    stamp: { provenance, where: "Damages Analysis" },
+  });
+
+  const applyDamageEdit = (msgId: string, prop: DamageEditProposal) => {
+    if (!damages) return;
+    const item = damages.items.find((i) => i.id === prop.id);
+    if (!item) return;
+    // Only the field named in the proposal changes. Everything else on the
+    // record — including its verification status — is left exactly as it was.
+    const patch: Partial<DamageItem> = {};
+    if (prop.field === "amount" && prop.amount != null) patch.amount = prop.amount;
+    else if (prop.field === "description") patch.description = prop.proposed;
+    else if (prop.field === "category") patch.category = prop.proposed;
+    else if (prop.field === "reasoning") patch.reasoning = prop.proposed;
+    else if (prop.field === "notes") patch.notes = prop.proposed;
+    else if (prop.field === "docs") {
+      const list = prop.proposed.split(/,\s*/).map((d) => d.trim()).filter(Boolean);
+      patch.docs = list;
+      patch.docCount = Math.max(item.docCount, list.length);
+    }
+    const changes: FieldChange[] = [{ field: prop.fieldLabel, previous: prop.current, next: prop.proposed }];
+    damages.updateDamage(prop.id, patch, changes, aiActor(CURRENT_ATTORNEY), prop.instruction);
+    settle(msgId, "edit", "applied", confirm(
+      prop.field === "amount"
+        ? `${prop.label} updated to ${prop.proposed}.`
+        : `${prop.label} — ${prop.fieldLabel.toLowerCase()} updated.`,
+      "AI Modified",
+    ));
+  };
+
+  const applyDamageAdd = (msgId: string, prop: DamageAddProposal) => {
+    if (!damages) return;
+    const id = `${prop.label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}-${Math.round(performance.now()) % 100000}`;
+    damages.createDamage(
+      {
+        id, label: prop.label, bucket: prop.bucket, amount: prop.amount,
+        description: prop.description, category: prop.category, reasoning: prop.reasoning,
+        docs: prop.docs, docCount: prop.docs.length, iconKey: "receipt",
+        // Created through the attorney's instruction to the assistant, and not
+        // yet backed by verified evidence — provenance and verification are
+        // separate, and the store sets the provenance from the actor.
+        verified: false,
+      },
+      aiActor(CURRENT_ATTORNEY),
+      prop.instruction,
+    );
+    settle(msgId, "add", "applied", confirm(
+      `${prop.label} — ${formatDamageUSD(prop.amount)} added to ${prop.bucketLabel}.`,
+      "AI Created",
+    ));
+  };
+
+  const applyDamageDelete = (msgId: string, prop: DamageDeleteProposal) => {
+    if (!damages) return;
+    damages.deleteDamage(prop.id, aiActor(CURRENT_ATTORNEY), prop.instruction);
+    settle(msgId, "delete", "applied", confirm(
+      `${prop.label} (${formatDamageUSD(prop.amount)}) removed.`,
+      "AI Modified",
+    ));
+  };
+
+  const applyDamageMove = (msgId: string, prop: DamageMoveProposal) => {
+    if (!damages) return;
+    damages.moveDamage(prop.id, prop.to, aiActor(CURRENT_ATTORNEY), prop.instruction);
+    settle(msgId, "move", "applied", confirm(
+      `${prop.label} moved from ${prop.fromLabel} to ${prop.toLabel}.`,
+      "AI Modified",
+    ));
+  };
+
+  const cancelDamage = (msgId: string, kind: "edit" | "add" | "delete" | "move") =>
+    settle(msgId, kind, "cancelled");
+
+  // Reviewing a suggestion turns it into an ordinary add proposal. It is still
+  // a proposal — the attorney confirms it on the card like any other.
+  const reviewSuggestion = (msgId: string, index: number, sg: DamageSuggestion) =>
+    setConversations((prev) =>
+      prev.map((conv) =>
+        conv.id !== active.id ? conv : {
+          ...conv,
+          messages: [
+            ...conv.messages.map((m) =>
+              m.id !== msgId || !m.damageSuggest ? m
+                : { ...m, damageSuggest: m.damageSuggest.map((x, i) => (i === index ? { ...x, state: "reviewing" as const } : x)) },
+            ),
+            {
+              id: `a-${Math.round(performance.now())}`, role: "assistant" as const, context: ctxLabel,
+              answer: { headline: `Here is ${sg.label} prepared as a damage. Nothing is added until you confirm.`, points: [], citations: [] },
+              damageAdd: { proposal: proposalFromSuggestion(sg, `Reviewed the suggested ${sg.label} damage`), state: "pending" as const },
+            },
+          ],
+        },
+      ),
+    );
+
+  const dismissSuggestion = (msgId: string, index: number) =>
+    setConversations((prev) =>
+      prev.map((conv) =>
+        conv.id !== active.id ? conv : {
+          ...conv,
+          messages: conv.messages.map((m) =>
+            m.id !== msgId || !m.damageSuggest ? m
+              : { ...m, damageSuggest: m.damageSuggest.map((x, i) => (i === index ? { ...x, state: "dismissed" as const } : x)) },
+          ),
+        },
+      ),
+    );
+
+  const damageHandlers: DamageHandlers = {
+    onDamageEdit: applyDamageEdit,
+    onDamageAdd: applyDamageAdd,
+    onDamageDelete: applyDamageDelete,
+    onDamageMove: applyDamageMove,
+    onDamageCancel: cancelDamage,
+    onReviewSuggestion: reviewSuggestion,
+    onDismissSuggestion: dismissSuggestion,
   };
 
   const runAction = (act: DocActionId) => {
@@ -975,6 +1434,7 @@ export function AssistantPanel() {
             onApply={applyProposal}
             onAddEvent={addProposedEvent}
             onApplyEdit={applyProposedEdit}
+            damage={damageHandlers}
           />
         )}
         <div ref={endRef} />

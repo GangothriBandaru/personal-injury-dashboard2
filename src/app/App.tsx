@@ -17,6 +17,7 @@ import { NotesProvider } from "./notes/NotesContext";
 import { FloatingNotes } from "./components/FloatingNotes";
 import { AssistantProvider } from "./assistant/AssistantContext";
 import { ChronologyProvider } from "./chronology/ChronologyContext";
+import { DamagesProvider } from "./damages/DamagesContext";
 import { AssistantLauncher, AssistantPanel, AssistantMain } from "./assistant/AiAssistant";
 import {
   PipelineState, CaseDocument, AttorneyNote,
@@ -223,6 +224,7 @@ export default function App() {
 
   return (
     <ChronologyProvider>
+    <DamagesProvider>
     <NotesProvider caseName={currentCaseName} stage={currentStage}>
       <AssistantProvider
         page={activePage}
@@ -250,6 +252,7 @@ export default function App() {
       <FloatingNotes />
       </AssistantProvider>
     </NotesProvider>
+    </DamagesProvider>
     </ChronologyProvider>
   );
 }

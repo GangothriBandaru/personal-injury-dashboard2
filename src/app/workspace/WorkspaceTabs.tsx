@@ -6,7 +6,7 @@ import {
   Gavel, MessageSquare, SlidersHorizontal,
   HeartPulse, ClipboardList, Image as ImageIcon, Video, FileSignature, Quote,
   Pencil, RotateCcw, History, TrendingUp, TrendingDown, Info, Shield, Circle, Loader2, Bot, Send,
-  Plus, UserPlus,
+  Plus, UserPlus, Receipt, Trash2,
 } from "lucide-react";
 import type { AnalysisFinding, CaseDocument } from "../types/case";
 import { classifyDocuments } from "../types/case";
@@ -17,6 +17,11 @@ import {
   useChronologyOptional, PROVENANCE_LABEL,
   type Provenance, type ChronVersion, type ChronAddition, type ChronOverride,
 } from "../chronology/ChronologyContext";
+import {
+  useDamagesOptional, attorneyActor, formatDamageUSD,
+  DAMAGE_SEED, DAMAGE_PROVENANCE_LABEL, DAMAGE_ACTION_LABEL, DAMAGE_FIELD_LABEL, BUCKET_LABEL,
+  type DamageAudit, type DamageBucket, type DamageItem, type DamageProvenance, type FieldChange,
+} from "../damages/DamagesContext";
 import { InjuryIntelligenceSection } from "../components/InjuryIntelligenceSection";
 
 // ── Shared model & helpers ────────────────────────────────────────────────────
@@ -1819,6 +1824,13 @@ function itemisedAmountFor(doc: string): number | null {
   return null;
 }
 
+// The amount the itemised damages breakdown records against a document, wherever
+// in the breakdown it appears. Null when the document is not itemised at all —
+// which means nothing is evidenced by it, not that it evidences zero.
+export function documentAmount(doc: string): number | null {
+  return itemisedAmountFor(doc);
+}
+
 // A single document's bill, or null when the document is not a billing document.
 // Absence of a bill is never zero — it means nothing was billed on this record.
 export function billForDocument(doc: string): DocumentBill | null {
@@ -1849,32 +1861,32 @@ export function billsForEvidence(evidence: string[]): DocumentBill[] {
 // multiplier controls and no settlement-strategy scenarios here — those live on
 // the Valuation stage, which this page links out to at the bottom.
 
-const ECONOMIC = [
-  { label: "Medical Expenses", desc: "Emergency, hospital, imaging & physician bills", value: 87500, icon: Stethoscope,
-    category: "Medical Bills", docCount: 18,
-    reasoning: "Every charge traces to an itemized billing document and reconciles to the verified total with no duplicates.",
-    docs: ["Hospital_Bill.pdf", "hospital_medical_records.pdf", "ER_Bills.pdf", "MRI_Report_2026.pdf"] },
-  { label: "Lost Wages", desc: "Documented income loss during treatment", value: 43200, icon: DollarSign,
-    category: "Lost Wages", docCount: 6,
-    reasoning: "Verified against employer payroll records and the plaintiff's pre-incident earnings history.",
-    docs: ["Wage_Loss_Statement.pdf", "Employer_Payroll_Records.pdf"] },
-  { label: "Future Medical Care", desc: "Projected ongoing medical management", value: 18750, icon: HeartPulse,
-    category: "Future Medical Care", docCount: 9,
-    reasoning: "Projected from the life-care plan and corroborating treating-physician cost estimates.",
-    docs: ["Life_Care_Plan.pdf", "Treating_Physician_Estimate.pdf"] },
-  { label: "Physical Therapy", desc: "Physical therapy & rehabilitation program", value: 6000, icon: Activity,
-    category: "Rehabilitation", docCount: 12,
-    reasoning: "Substantiated by the documented physical-therapy treatment record and invoices.",
-    docs: ["PT_Treatment_Notes.pdf", "Therapy_Invoices.pdf"] },
-  { label: "Transportation", desc: "Mileage & medical travel costs", value: 3850, icon: MapPin,
-    category: "Transportation", docCount: 5,
-    reasoning: "Mileage and medical-travel expenses tied to documented appointments at the standard reimbursement rate.",
-    docs: ["Mileage_Log.pdf"] },
-  { label: "Other Expenses", desc: "Assistive devices & out-of-pocket costs", value: 2150, icon: ClipboardList,
-    category: "Other Damages", docCount: 4,
-    reasoning: "Assistive devices and out-of-pocket costs, each backed by an itemized receipt.",
-    docs: ["Out_of_Pocket_Receipts.pdf"] },
-];
+// Icons for the seeded damage categories. A damage added later — by the
+// attorney or through the assistant — falls back to the generic receipt.
+const DAMAGE_ICON: Record<string, typeof DollarSign> = {
+  stethoscope: Stethoscope, dollar: DollarSign, heart: HeartPulse,
+  activity: Activity, pin: MapPin, clipboard: ClipboardList,
+};
+
+// One economic damage as this stage renders it. The damage record itself is
+// carried on `item`, so a row can show its provenance and be acted upon.
+type EcoRow = {
+  label: string; desc: string; value: number; icon: typeof DollarSign;
+  category: string; docCount: number; reasoning: string; docs: string[];
+  item: DamageItem;
+};
+
+const toRow = (d: DamageItem): EcoRow => ({
+  label: d.label, desc: d.description, value: d.amount,
+  icon: DAMAGE_ICON[d.iconKey] ?? Receipt,
+  category: d.category, docCount: d.docCount, reasoning: d.reasoning, docs: d.docs,
+  item: d,
+});
+
+// The damages on file at load. Module-level helpers (document billing, stage
+// citations) read this; the stage itself reads the live store, so an assistant
+// edit is reflected the moment it is applied.
+const ECONOMIC: EcoRow[] = DAMAGE_SEED.filter((d) => d.bucket === "economic").map(toRow);
 
 // Non-economic damage categories the recommended multiplier is applied to.
 // Severity tag → pill class. Mirrors the LECO status-pill palette
@@ -2134,8 +2146,736 @@ function PrecedentChatPanel({ caseName, onBack }: { caseName: string; onBack: ()
   );
 }
 
+// Provenance for one damage. `Verified` describes the evidence; the second
+// badge says how the record came to hold its current values. An AI edit changes
+// the second badge and leaves the first alone.
+function DamageProvenanceBadges({ item }: { item: DamageItem }) {
+  const prov: DamageProvenance = item.provenance;
+  const Icon = prov === "user" || prov === "user-edited" ? UserPlus : prov.startsWith("ai") ? Sparkles : Bot;
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      {item.verified && (
+        <span className="pill pill-complete"><ShieldCheck className="w-3.5 h-3.5" strokeWidth={1.75} /> Verified</span>
+      )}
+      <span className="pill pill-neutral" title={item.addedBy ? `${DAMAGE_PROVENANCE_LABEL[prov]} · ${item.addedBy}` : DAMAGE_PROVENANCE_LABEL[prov]}>
+        <Icon className="w-3.5 h-3.5" strokeWidth={1.75} /> {DAMAGE_PROVENANCE_LABEL[prov]}
+      </span>
+    </div>
+  );
+}
+
+// One damage line. Collapsed it is a label and an amount; opened it explains the
+// figure and offers the itemised detail drawer where there are documents to show.
+// ── Settlement explainer ─────────────────────────────────────────────────────
+// The total is the one figure an attorney is asked to defend, so it answers for
+// itself. Hover or focus gives the one-line reason; View details opens the
+// arithmetic. Every figure is passed in from the stage's own calculation — this
+// component computes nothing, so it cannot disagree with the bar above it.
+
+function SettlementExplainer({
+  economic, nonEconomic, total, multiplier, itemisedNonEconomic, factors,
+}: {
+  economic: number;
+  nonEconomic: number;
+  total: number;
+  multiplier: number;
+  /** Non-economic damages listed as line items rather than derived from the multiplier. */
+  itemisedNonEconomic: number;
+  factors: string[];
+}) {
+  const [mode, setMode] = useState<"closed" | "hint" | "details">("closed");
+  // Hover alone closes again on mouse-out; a click or a keyboard focus keeps it
+  // open, so the panel is usable without a pointer.
+  const [held, setHeld] = useState(false);
+  // The bar sits low in the card, so upward is the natural direction — but the
+  // page header is sticky, and a tall panel would slide underneath it. Open on
+  // whichever side has the room and cap the panel to it, so the whole thing is
+  // always reachable. 176px is the header stack this stage already
+  // scroll-anchors against.
+  const [pos, setPos] = useState({ drop: false, max: 420 });
+  const root = useRef<HTMLDivElement>(null);
+
+  const close = () => { setMode("closed"); setHeld(false); };
+
+  const place = (needed: number) => {
+    const box = root.current?.getBoundingClientRect();
+    if (!box) return setPos({ drop: true, max: needed });
+    const above = box.top - 176 - 8;
+    const below = window.innerHeight - box.bottom - 16;
+    const drop = above < needed && below > above;
+    setPos({ drop, max: Math.max(200, Math.floor(drop ? below : above)) });
+  };
+  const open = (next: "hint" | "details") => {
+    place(next === "details" ? 420 : 150);
+    setMode(next);
+  };
+
+  useEffect(() => {
+    if (mode === "closed") return;
+    const onDown = (e: MouseEvent) => {
+      if (!root.current?.contains(e.target as Node)) close();
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [mode]);
+
+  const derived = nonEconomic - itemisedNonEconomic;
+
+  return (
+    <div ref={root} className="relative shrink-0">
+      <button
+        type="button"
+        aria-expanded={mode !== "closed"}
+        aria-label={`Total estimated settlement ${formatUSD(total)}. How this is calculated.`}
+        onMouseEnter={() => { if (mode === "closed") open("hint"); }}
+        onMouseLeave={() => { if (mode === "hint" && !held) setMode("closed"); }}
+        onFocus={() => { if (mode === "closed") { open("hint"); setHeld(true); } }}
+        // Clicking never dismisses a hint the pointer just opened — it pins it,
+        // so hovering and then clicking the figure does not close it in the
+        // attorney's face. Only a click on an already-pinned popover shuts it.
+        onClick={() => {
+          if (mode === "closed") { open("hint"); setHeld(true); return; }
+          if (!held) { setHeld(true); return; }
+          close();
+        }}
+        className="flex items-center gap-1.5 rounded-lg px-1.5 -mx-1.5 py-0.5 text-white font-bold tabular-nums hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand transition-colors"
+        style={{ fontSize: "24px", lineHeight: 1.1, letterSpacing: "-0.01em" }}
+      >
+        {formatUSD(total)}
+        <Info className="w-4 h-4 text-soft shrink-0" strokeWidth={1.75} />
+      </button>
+
+      {/* Opens upward: the bar sits at the foot of the card, so downward would
+          push the panel off the fold. */}
+      {mode === "hint" && (
+        <div className={`absolute right-0 ${pos.drop ? "top-full mt-2" : "bottom-full mb-2"} z-40 w-[280px] rounded-xl border border-line bg-white shadow-lg p-3.5 text-left`}>
+          <p className="text-sm font-semibold text-ink">How is this settlement value calculated?</p>
+          <p className="secondary-text mt-1 leading-relaxed">
+            Verified economic damages plus the estimated non-economic damages, using the recommended multiplier.
+          </p>
+          <button
+            onClick={() => { open("details"); setHeld(true); }}
+            className="inline-flex items-center gap-1 mt-2 text-xs font-semibold text-deep hover:text-ink transition-colors"
+          >
+            View details <ArrowRight className="w-3.5 h-3.5" strokeWidth={1.75} />
+          </button>
+        </div>
+      )}
+
+      {mode === "details" && (
+        <div
+          style={{ maxHeight: pos.max }}
+          className={`absolute right-0 ${pos.drop ? "top-full mt-2" : "bottom-full mb-2"} z-40 w-[400px] max-w-[calc(100vw-3rem)] overflow-y-auto rounded-xl border border-line bg-white shadow-lg text-left`}
+        >
+          <div className="flex items-start justify-between gap-3 px-4 pt-3.5 pb-2">
+            <span className="eyebrow">Settlement Calculation</span>
+            <button onClick={close} title="Close" className="p-0.5 -mr-1 -mt-0.5 rounded hover:bg-tint transition-colors shrink-0">
+              <X className="w-4 h-4 text-[#5B6B78]" strokeWidth={1.75} />
+            </button>
+          </div>
+
+          {/* The arithmetic, in the order it is worked out. */}
+          <div className="px-4">
+            <div className="flex items-baseline justify-between gap-3 py-1.5">
+              <span className="body-text">Economic Damages</span>
+              <span className="text-sm font-medium text-ink tabular-nums shrink-0">{formatUSD(economic)}</span>
+            </div>
+            <div className="flex items-baseline justify-between gap-3 py-1.5">
+              <span className="body-text">Non-Economic Damages</span>
+              <span className="text-sm font-medium text-ink tabular-nums shrink-0">{formatUSD(nonEconomic)}</span>
+            </div>
+            <div className="flex items-baseline justify-between gap-3 pt-2.5 mt-1 border-t-2 border-line">
+              <span className="text-sm font-semibold text-ink">Total Estimated Settlement</span>
+              <span className="text-base font-bold text-ink tabular-nums shrink-0">{formatUSD(total)}</span>
+            </div>
+          </div>
+
+          {/* Where the non-economic figure comes from — the step the attorney is
+              most likely to be asked about. */}
+          <div className="mx-4 mt-3.5 rounded-xl bg-tint border border-[#D6F2F7] px-3.5 py-3">
+            <div className="eyebrow mb-1.5">Non-Economic Damages</div>
+            <div className="mono-ref text-ink">
+              {formatUSD(economic)} <span className="text-deep">×</span> {fmtMult(multiplier)} multiplier
+            </div>
+            <div className="mono-ref text-ink font-semibold mt-0.5">= {formatUSD(derived)}</div>
+            {itemisedNonEconomic > 0 && (
+              <div className="mono-ref text-ink mt-1 pt-1 border-t border-[#D6F2F7]">
+                <span className="text-deep">+</span> {formatUSD(itemisedNonEconomic)} itemised
+                <span className="font-semibold"> = {formatUSD(nonEconomic)}</span>
+              </div>
+            )}
+          </div>
+
+          <div className="px-4 pt-3.5 pb-4">
+            <div className="eyebrow mb-1.5">Why this value?</div>
+            <p className="secondary-text leading-relaxed">
+              Based on the current case assessment, the estimate considers the documented severity of
+              injuries, permanent impairment, and supporting liability evidence.
+            </p>
+            {factors.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2.5">
+                {factors.map((f) => (
+                  <span key={f} className="pill pill-neutral">
+                    <CheckCircle className="w-3.5 h-3.5" strokeWidth={1.75} /> {f}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Attorney editing ─────────────────────────────────────────────────────────
+// One Edit icon per row is the whole entry point, and the form replaces the row
+// in place rather than opening over the page. Moving a damage, deleting it and
+// reading its history live inside that form, so the computation view stays a
+// list of figures. All four actions go through the shared damage operations, so
+// the trail, the provenance and the totals behave identically however a change
+// was made.
+
+// The editable shape of a damage. Only the fields the record actually holds —
+// there is no second model behind the form.
+interface DamageDraft {
+  label: string;
+  category: string;
+  amount: string;
+  description: string;
+  reasoning: string;
+  notes: string;
+  docs: string;
+  bucket: DamageBucket;
+}
+
+const draftOf = (d: DamageItem): DamageDraft => ({
+  label: d.label,
+  category: d.category,
+  amount: String(d.amount),
+  description: d.description,
+  reasoning: d.reasoning,
+  notes: d.notes ?? "",
+  docs: d.docs.join(", "),
+  bucket: d.bucket,
+});
+
+const blankDraft = (bucket: DamageBucket): DamageDraft => ({
+  label: "", category: "", amount: "", description: "", reasoning: "", notes: "", docs: "", bucket,
+});
+
+const parseDocs = (s: string) => s.split(",").map((d) => d.trim()).filter(Boolean);
+const parseMoney = (s: string) => Math.max(0, Math.round(Number(s.replace(/[^0-9.]/g, "")) || 0));
+
+// A labelled field in the damage form.
+function Field({
+  label, value, onChange, multiline = false, hint, prefix,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  multiline?: boolean;
+  hint?: string;
+  prefix?: string;
+}) {
+  const cls = "w-full rounded-lg border border-line bg-white px-2.5 py-1.5 text-sm text-ink focus:outline-none focus:border-brand transition-colors";
+  return (
+    <div>
+      <label className="eyebrow block mb-1">{label}</label>
+      {multiline ? (
+        <textarea value={value} rows={2} onChange={(e) => onChange(e.target.value)} className={`${cls} resize-y`} />
+      ) : (
+        <div className="relative">
+          {prefix && <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-[#8A98A3]">{prefix}</span>}
+          <input value={value} onChange={(e) => onChange(e.target.value)} className={`${cls} ${prefix ? "pl-6 tabular-nums" : ""}`} />
+        </div>
+      )}
+      {hint && <p className="text-[11px] text-[#8A98A3] mt-1">{hint}</p>}
+    </div>
+  );
+}
+
+// The damage form, used for both editing an existing damage and adding a new
+// one. Same fields either way, so the two never drift apart. Editing an existing
+// damage also offers its history and its deletion — secondary actions that would
+// clutter the row but belong here.
+function DamageForm({
+  title, draft, setDraft, onCancel, onSave, saveLabel, lockBucket = false, onDelete, onHistory,
+}: {
+  title: string;
+  draft: DamageDraft;
+  setDraft: (d: DamageDraft) => void;
+  onCancel: () => void;
+  onSave: () => void;
+  saveLabel: string;
+  lockBucket?: boolean;
+  /** Editing an existing damage only — absent when adding a new one. */
+  onDelete?: () => void;
+  onHistory?: () => void;
+}) {
+  const set = (k: keyof DamageDraft) => (v: string) => setDraft({ ...draft, [k]: v });
+  const valid = draft.label.trim().length > 0 && parseMoney(draft.amount) >= 0;
+  return (
+    <div className="rounded-xl border border-[#D6F2F7] bg-[#F6FDFF] p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <Pencil className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+        <span className="eyebrow text-deep">{title}</span>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Damage" value={draft.label} onChange={set("label")} />
+        <Field label="Damage Type" value={draft.category} onChange={set("category")} />
+        <Field label="Amount" value={draft.amount} onChange={set("amount")} prefix="$" />
+        <div>
+          <label className="eyebrow block mb-1">Bucket</label>
+          <select
+            value={draft.bucket}
+            disabled={lockBucket}
+            onChange={(e) => setDraft({ ...draft, bucket: e.target.value as DamageBucket })}
+            className="w-full rounded-lg border border-line bg-white px-2.5 py-1.5 text-sm text-ink focus:outline-none focus:border-brand transition-colors disabled:text-[#8A98A3]"
+          >
+            {(Object.keys(BUCKET_LABEL) as DamageBucket[]).map((b) => (
+              <option key={b} value={b}>{BUCKET_LABEL[b]}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div className="mt-3 space-y-3">
+        <Field label="Description" value={draft.description} onChange={set("description")} multiline />
+        <Field label="Supporting Information" value={draft.reasoning} onChange={set("reasoning")} multiline />
+        <Field
+          label="Supporting Documents"
+          value={draft.docs}
+          onChange={set("docs")}
+          hint="Comma-separated. Removing one here releases this damage's claim on it; the document stays on the case file."
+        />
+        <Field label="Notes" value={draft.notes} onChange={set("notes")} multiline />
+      </div>
+      <div className="flex items-center justify-between gap-3 mt-4 flex-wrap">
+        <div className="flex items-center gap-3">
+          {onHistory && (
+            <button onClick={onHistory} className="inline-flex items-center gap-1.5 text-xs font-semibold text-deep hover:text-ink transition-colors">
+              <History className="w-3.5 h-3.5" strokeWidth={1.75} /> History
+            </button>
+          )}
+          {onDelete && (
+            <button onClick={onDelete} className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#B42318] hover:text-[#96200F] transition-colors">
+              <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} /> Delete damage
+            </button>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={onCancel} className="btn btn-secondary px-3 py-2 text-sm">Cancel</button>
+          <button onClick={onSave} disabled={!valid} className="btn btn-primary px-3 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+            {saveLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Deleting is destructive, so it is always confirmed and always says what goes.
+function DeleteDamageDialog({
+  item, onCancel, onConfirm,
+}: { item: DamageItem; onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <>
+      <div className="fixed inset-0 bg-ink/40 z-[80]" onClick={onCancel} />
+      <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[80] w-[420px] max-w-[92vw] rounded-2xl border border-line bg-white shadow-xl p-5">
+        <div className="flex items-center gap-2 mb-2.5">
+          <AlertTriangle className="w-4 h-4 text-[#B42318] shrink-0" strokeWidth={1.75} />
+          <h3 className="card-title">Delete this damage?</h3>
+        </div>
+        <div className="rounded-xl border border-[#F5C9C4] bg-[#FEF4F3] px-3.5 py-3 flex items-center justify-between gap-3">
+          <span className="body-text font-medium">{item.label}</span>
+          <span className="text-sm font-bold text-ink tabular-nums shrink-0">{formatUSD(item.amount)}</span>
+        </div>
+        <p className="secondary-text mt-2.5">
+          This will remove this damage from the case calculation. Its supporting documents stay on the case file.
+        </p>
+        <div className="flex items-center justify-end gap-2 mt-4">
+          <button onClick={onCancel} className="btn btn-secondary px-3 py-2 text-sm">Cancel</button>
+          <button
+            onClick={onConfirm}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold text-white bg-[#B42318] hover:bg-[#96200F] transition-colors"
+          >
+            <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} /> Delete
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// The change history for one damage — every action, who made it and when.
+function DamageHistoryDrawer({
+  item, entries, onClose,
+}: { item: DamageItem; entries: DamageAudit[]; onClose: () => void }) {
+  const newestFirst = [...entries].reverse();
+  return (
+    <>
+      <div className="fixed inset-0 bg-ink/40 z-[70]" onClick={onClose} />
+      <div className="fixed top-0 right-0 h-full w-[460px] max-w-[92vw] bg-white shadow-xl z-[70] flex flex-col">
+        <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-line shrink-0">
+          <div className="min-w-0">
+            <div className="eyebrow mb-1">Damage History</div>
+            <h2 className="card-title">{item.label}</h2>
+            <div className="mono-ref mt-1">{formatUSD(item.amount)} · {BUCKET_LABEL[item.bucket]}</div>
+          </div>
+          <button onClick={onClose} title="Close" className="p-1.5 hover:bg-tint rounded-lg transition-colors shrink-0">
+            <X className="w-5 h-5 text-[#5B6B78]" strokeWidth={1.75} />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-5">
+          {newestFirst.length === 0 ? (
+            <p className="secondary-text">
+              No changes recorded. This damage is as it was first put on the case file.
+            </p>
+          ) : (
+            <div className="relative">
+              {newestFirst.map((e, i) => (
+                <div key={e.id} className="relative flex gap-3 pb-6 last:pb-0">
+                  <div className="flex flex-col items-center shrink-0">
+                    <div className="w-2.5 h-2.5 rounded-full bg-white border-2 border-brand mt-1.5" />
+                    {i < newestFirst.length - 1 && <div className="w-px flex-1 bg-line mt-1.5" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-semibold text-ink">
+                        {e.changedBy} {DAMAGE_ACTION_LABEL[e.action]}
+                      </span>
+                      <span className="mono-ref">{e.at}</span>
+                    </div>
+                    {e.requestedBy && (
+                      <p className="text-xs text-[#8A98A3] mt-0.5">Requested by {e.requestedBy}</p>
+                    )}
+                    <div className="rounded-xl border border-line divide-y divide-line mt-2">
+                      {e.field && (
+                        <div className="px-3.5 py-2">
+                          <div className="eyebrow mb-0.5">{e.field}</div>
+                          <div className="flex items-center gap-2 flex-wrap body-text">
+                            <span className="text-[#5B6B78]">{e.previous || "—"}</span>
+                            <ArrowRight className="w-3.5 h-3.5 text-[#8A98A3] shrink-0" strokeWidth={1.75} />
+                            <span className="font-semibold text-ink">{e.next || "—"}</span>
+                          </div>
+                        </div>
+                      )}
+                      {e.action === "moved" && (
+                        <div className="px-3.5 py-2">
+                          <div className="eyebrow mb-0.5">Bucket</div>
+                          <div className="flex items-center gap-2 flex-wrap body-text">
+                            <span className="text-[#5B6B78]">{e.from}</span>
+                            <ArrowRight className="w-3.5 h-3.5 text-[#8A98A3] shrink-0" strokeWidth={1.75} />
+                            <span className="font-semibold text-ink">{e.to}</span>
+                          </div>
+                        </div>
+                      )}
+                      {e.action === "created" && (
+                        <div className="px-3.5 py-2">
+                          <div className="eyebrow mb-0.5">Created</div>
+                          <p className="body-text">{e.next} in {e.to}</p>
+                        </div>
+                      )}
+                      {e.action === "deleted" && (
+                        <div className="px-3.5 py-2">
+                          <div className="eyebrow mb-0.5">Deleted</div>
+                          <p className="body-text">{e.amount} removed from {e.from}</p>
+                        </div>
+                      )}
+                      {e.reason && (
+                        <div className="px-3.5 py-2">
+                          <div className="eyebrow mb-0.5">Reason</div>
+                          <p className="body-text leading-relaxed">{e.reason}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function DamageRow({
+  row, open, onToggle, onDetails, editing, onEdit, onCancelEdit, onSave, onHistory, onDelete,
+}: {
+  row: EcoRow;
+  open: boolean;
+  onToggle: () => void;
+  onDetails: () => void;
+  /** Editing controls are absent outside the provider, leaving the row read-only. */
+  editing?: boolean;
+  onEdit?: () => void;
+  onCancelEdit?: () => void;
+  onSave?: (draft: DamageDraft) => void;
+  onHistory?: () => void;
+  onDelete?: () => void;
+}) {
+  const [draft, setDraft] = useState<DamageDraft>(() => draftOf(row.item));
+  // Re-seed the form each time this row is opened for editing, so it always
+  // starts from what is on the record rather than a stale draft.
+  useEffect(() => { if (editing) setDraft(draftOf(row.item)); }, [editing, row.item]);
+
+  const changed = row.item.provenance !== "system";
+  const editable = !!onEdit;
+  const hasDocs = row.docCount > 0 && row.docs.length > 0;
+
+  if (editing && onSave && onCancelEdit) {
+    return (
+      <div className="py-2.5">
+        <DamageForm
+          title={`Edit ${row.label}`}
+          draft={draft}
+          setDraft={setDraft}
+          onCancel={onCancelEdit}
+          onSave={() => onSave(draft)}
+          saveLabel="Save Changes"
+          onDelete={onDelete}
+          onHistory={onHistory}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="py-2.5">
+      <div className="flex items-center justify-between gap-3">
+        <button onClick={onToggle} aria-expanded={open} className="flex items-center gap-3 text-left min-w-0">
+          <div className="w-8 h-8 rounded-lg bg-tint flex items-center justify-center shrink-0">
+            <row.icon className="w-4 h-4 text-deep" strokeWidth={1.75} />
+          </div>
+          <span className="body-text truncate">{row.label}</span>
+          {changed && (
+            <span className="pill pill-neutral shrink-0">
+              {row.item.provenance.startsWith("ai")
+                ? <Sparkles className="w-3 h-3" strokeWidth={1.75} />
+                : <UserPlus className="w-3 h-3" strokeWidth={1.75} />}
+              {DAMAGE_PROVENANCE_LABEL[row.item.provenance]}
+            </span>
+          )}
+          <ChevronDown className={`w-4 h-4 text-[#5B6B78] shrink-0 transition-transform ${open ? "rotate-180" : ""}`} strokeWidth={1.75} />
+        </button>
+        <div className="flex items-center gap-1 shrink-0">
+          <span className="text-sm font-medium text-ink tabular-nums">{formatUSD(row.value)}</span>
+          {editable && (
+            <button
+              onClick={onEdit}
+              title="Edit damage"
+              aria-label={`Edit ${row.label}`}
+              className="p-1.5 rounded-lg text-[#8A98A3] hover:bg-tint hover:text-deep transition-colors"
+            >
+              <Pencil className="w-3.5 h-3.5" strokeWidth={1.75} />
+            </button>
+          )}
+        </div>
+      </div>
+      {open && (
+        <div className="mt-2.5 ml-11 rounded-xl border border-line bg-white p-3.5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="secondary-text">{row.reasoning}</p>
+              <div className="flex items-center gap-1.5 mt-1.5 text-xs text-[#5B6B78]">
+                <FileText className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
+                {hasDocs
+                  ? `We considered ${row.docs[0]} and ${row.docCount - 1}+ more documents.`
+                  : "No supporting documents are attached yet."}
+              </div>
+              {row.item.notes && <p className="secondary-text mt-1.5">Note: {row.item.notes}</p>}
+            </div>
+            {hasDocs && (
+              <button onClick={onDetails} className="shrink-0 text-sm font-semibold text-deep hover:text-ink transition-colors whitespace-nowrap">
+                View details →
+              </button>
+            )}
+          </div>
+          <div className="mt-2.5 pt-2.5 border-t border-line flex items-center justify-between gap-3 flex-wrap">
+            <span className="text-xs text-[#5B6B78]">{row.desc}</span>
+            <DamageProvenanceBadges item={row.item} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// The change history for the whole damage record — every create, edit, move and
+// delete, whoever made it, newest first. Per-damage history lives on the row's
+// own menu; this is the stage-wide view.
+function DamageEditHistory({ audit }: { audit: DamageAudit[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-xl border border-line bg-white p-4">
+      <div className="flex items-center justify-between gap-3">
+        <button onClick={() => setOpen((v) => !v)} className="inline-flex items-center gap-1.5 text-xs font-semibold text-deep hover:text-ink transition-colors">
+          <History className="w-3.5 h-3.5" strokeWidth={1.75} /> {open ? "Hide" : "View"} Damage Change History
+        </button>
+        <span className="text-xs text-[#8A98A3]">
+          {audit.length === 0 ? "No changes yet" : `${audit.length} change${audit.length === 1 ? "" : "s"}`}
+        </span>
+      </div>
+      {open && (
+        <div className="mt-3 space-y-2">
+          {audit.length === 0 ? (
+            <p className="secondary-text">
+              No damage has been changed yet. Every figure here is as it was first recorded.
+            </p>
+          ) : (
+            [...audit].reverse().map((e) => {
+              const Icon = e.action === "deleted" ? Trash2 : e.action === "created" ? Plus : e.action === "moved" ? ArrowRight : Pencil;
+              return (
+                <div key={e.id} className="rounded-lg border border-line bg-offwhite p-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="pill pill-neutral"><Icon className="w-3.5 h-3.5" strokeWidth={1.75} /> {DAMAGE_ACTION_LABEL[e.action]}</span>
+                    <span className="text-sm font-semibold text-ink">{e.damage}</span>
+                    <span className="mono-ref">{e.at}</span>
+                  </div>
+                  <div className="mt-1.5 space-y-0.5 text-xs text-[#5B6B78]">
+                    {e.field && (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span>{e.field}:</span>
+                        <span className="tabular-nums">{e.previous}</span>
+                        <ArrowRight className="w-3 h-3 shrink-0" strokeWidth={1.75} />
+                        <span className="font-semibold text-ink tabular-nums">{e.next}</span>
+                      </div>
+                    )}
+                    {e.action === "moved" && (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span>{e.from}</span>
+                        <ArrowRight className="w-3 h-3 shrink-0" strokeWidth={1.75} />
+                        <span className="font-semibold text-ink">{e.to}</span>
+                      </div>
+                    )}
+                    {e.action === "created" && <div>Added to {e.to} at <span className="font-semibold text-ink tabular-nums">{e.next}</span></div>}
+                    {e.action === "deleted" && <div>Removed from {e.from} · <span className="font-semibold text-ink tabular-nums">{e.amount}</span></div>}
+                    <div>Changed by {e.changedBy}{e.requestedBy ? ` · Requested by ${e.requestedBy}` : ""}</div>
+                    <div className="italic">&ldquo;{e.reason}&rdquo;</div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: TabProps) {
-  const subtotal = ECONOMIC.reduce((s, e) => s + e.value, 0);
+  // The damage record, live. The assistant writes to the same store, so an
+  // applied change lands here without the attorney navigating anywhere.
+  const damages = useDamagesOptional();
+  const economicRows: EcoRow[] = damages ? damages.itemsIn("economic").map(toRow) : ECONOMIC;
+  const nonEconomicRows: EcoRow[] = damages ? damages.itemsIn("noneconomic").map(toRow) : [];
+  const damageAudit = damages?.audit ?? [];
+  const subtotal = economicRows.reduce((s, e) => s + e.value, 0);
+  const nonEconomicItemsTotal = nonEconomicRows.reduce((s, e) => s + e.value, 0);
+
+  // ── Attorney editing ─────────────────────────────────────────────────────
+  // Which row is in edit mode, which is pending deletion, whose history is
+  // open, and whether the add form is showing. Every handler below goes through
+  // the shared damage operations — this component holds no calculation or
+  // provenance logic of its own.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [historyId, setHistoryId] = useState<string | null>(null);
+  const [addingTo, setAddingTo] = useState<DamageBucket | null>(null);
+  const [addDraft, setAddDraft] = useState<DamageDraft>(blankDraft("economic"));
+  const actor = attorneyActor(CURRENT_USER);
+  const deleting = damages?.items.find((i) => i.id === deletingId) ?? null;
+  const historyItem = damages?.items.find((i) => i.id === historyId) ?? null;
+
+  // Only what the attorney actually changed is written, and only what changed
+  // is recorded — a saved form with one edited field leaves one history entry.
+  const saveEdit = (item: DamageItem, draft: DamageDraft) => {
+    if (!damages) return;
+    const next: Partial<DamageItem> = {
+      label: draft.label.trim() || item.label,
+      category: draft.category.trim(),
+      amount: parseMoney(draft.amount),
+      description: draft.description,
+      reasoning: draft.reasoning,
+      notes: draft.notes.trim() || undefined,
+      docs: parseDocs(draft.docs),
+    };
+    const changes: FieldChange[] = [];
+    const note = (field: string, previous: string, nextValue: string) => {
+      if (previous !== nextValue) changes.push({ field, previous: previous || "—", next: nextValue || "—" });
+    };
+    note("Damage", item.label, next.label!);
+    note(DAMAGE_FIELD_LABEL.category, item.category, next.category!);
+    note(DAMAGE_FIELD_LABEL.amount, formatDamageUSD(item.amount), formatDamageUSD(next.amount!));
+    note(DAMAGE_FIELD_LABEL.description, item.description, next.description!);
+    note(DAMAGE_FIELD_LABEL.reasoning, item.reasoning, next.reasoning!);
+    note(DAMAGE_FIELD_LABEL.notes, item.notes ?? "", next.notes ?? "");
+    note(DAMAGE_FIELD_LABEL.docs, item.docs.join(", "), next.docs!.join(", "));
+
+    // A damage that now cites a different set of documents should say so in its
+    // count, but never below the number it actually lists.
+    if (next.docs!.length !== item.docs.length) {
+      next.docCount = Math.max(item.docCount - item.docs.length, 0) + next.docs!.length;
+    }
+
+    if (changes.length > 0) {
+      damages.updateDamage(item.id, next, changes, actor, "Edited by attorney on the Damages Analysis stage.");
+    }
+    // The bucket is a move, not a field edit, so it keeps its own trail entry.
+    if (draft.bucket !== item.bucket) {
+      damages.moveDamage(item.id, draft.bucket, actor, "Moved by attorney on the Damages Analysis stage.");
+    }
+    setEditingId(null);
+  };
+
+  const addDamage = (draft: DamageDraft) => {
+    if (!damages) return;
+    const docs = parseDocs(draft.docs);
+    damages.createDamage(
+      {
+        id: `damage-${Math.round(performance.now())}-${Math.random().toString(36).slice(2, 6)}`,
+        label: draft.label.trim(),
+        bucket: draft.bucket,
+        amount: parseMoney(draft.amount),
+        description: draft.description,
+        category: draft.category.trim() || draft.label.trim(),
+        reasoning: draft.reasoning,
+        notes: draft.notes.trim() || undefined,
+        docs,
+        docCount: docs.length,
+        iconKey: "receipt",
+        // Added by hand and not yet reconciled against the evidence — authorship
+        // and verification are recorded separately.
+        verified: false,
+      },
+      actor,
+      "Added by attorney on the Damages Analysis stage.",
+    );
+    setAddingTo(null);
+  };
+
+  const openAdd = (bucket: DamageBucket) => {
+    setAddDraft(blankDraft(bucket));
+    setEditingId(null);
+    setAddingTo(bucket);
+  };
+
+  // Handlers a damage row needs, or undefined outside the provider — which is
+  // what leaves the row read-only rather than half-editable.
+  const rowActions = (item: DamageItem) => (damages ? {
+    editing: editingId === item.id,
+    onEdit: () => { setAddingTo(null); setEditingId(item.id); },
+    onCancelEdit: () => setEditingId(null),
+    onSave: (draft: DamageDraft) => saveEdit(item, draft),
+    onHistory: () => setHistoryId(item.id),
+    onDelete: () => setDeletingId(item.id),
+  } : {});
 
   // Shared Document Workspace (reused from Analysis/Overview). Each damage
   // category contributes a set of supporting documents; "View Evidence" opens
@@ -2181,14 +2921,18 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
   const factorByCat = (cat: string) => DA_DAMAGE_FACTORS.find((f) => f.category === cat)!;
   const currentMult = (cat: string) => factorMult[cat] ?? factorByCat(cat).aiMultiplier;
 
-  // Live recalculation — the overall multiplier is the sum of factor contributions.
-  const economicTotal = model.economicTotal;
+  // Live recalculation — the overall multiplier is the sum of factor
+  // contributions, applied to the economic damages actually on file. Every
+  // dependent figure below derives from these two, so nothing goes stale when a
+  // damage is edited, added, moved or deleted.
+  const economicTotal = subtotal;
   const aiOverall = DA_DAMAGE_FACTORS.reduce((s, f) => s + f.aiMultiplier, 0);
   const overallMult = DA_DAMAGE_FACTORS.reduce((s, f) => s + currentMult(f.category), 0);
-  const nonEconomicTotal = Math.round(economicTotal * overallMult);
+  // Itemised non-economic damages sit alongside the multiplier-derived figure.
+  const nonEconomicTotal = Math.round(economicTotal * overallMult) + nonEconomicItemsTotal;
   const recommendedSettlement = economicTotal + nonEconomicTotal;
-  const aiRecommendedSettlement = economicTotal + Math.round(economicTotal * aiOverall);
-  const settlementForOverall = (m: number) => economicTotal + Math.round(economicTotal * m);
+  const aiRecommendedSettlement = economicTotal + Math.round(economicTotal * aiOverall) + nonEconomicItemsTotal;
+  const settlementForOverall = (m: number) => economicTotal + Math.round(economicTotal * m) + nonEconomicItemsTotal;
   const hasOverride = (cat: string) => currentMult(cat) !== factorByCat(cat).aiMultiplier;
   const anyOverride = DA_DAMAGE_FACTORS.some((f) => hasOverride(f.category));
 
@@ -2236,21 +2980,21 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
   const [ecoRowsOpen, setEcoRowsOpen] = useState<Set<string>>(new Set());
   const toggleEcoRow = (label: string) =>
     setEcoRowsOpen((prev) => { const n = new Set(prev); if (n.has(label)) n.delete(label); else n.add(label); return n; });
-  const [drawerItem, setDrawerItem] = useState<(typeof ECONOMIC)[number] | null>(null);
+  const [drawerItem, setDrawerItem] = useState<EcoRow | null>(null);
   const [drawerDocsOpen, setDrawerDocsOpen] = useState(false);
   // Which itemized document rows are expanded (keyed by file name).
   const [expandedDocRows, setExpandedDocRows] = useState<Set<string>>(new Set());
   const toggleDocRow = (name: string) =>
     setExpandedDocRows((prev) => { const n = new Set(prev); if (n.has(name)) n.delete(name); else n.add(name); return n; });
-  const openDrawer = (item: (typeof ECONOMIC)[number]) => { setDrawerItem(item); setDrawerDocsOpen(false); setExpandedDocRows(new Set()); };
+  const openDrawer = (item: EcoRow) => { setDrawerItem(item); setDrawerDocsOpen(false); setExpandedDocRows(new Set()); };
 
   // Lock background scroll while any right-side drawer is open, so the dimmed
   // backdrop always covers the full viewport regardless of scroll position.
   useEffect(() => {
-    const anyDrawerOpen = !!detailFactor || !!selectedPrecedent || !!drawerItem;
+    const anyDrawerOpen = !!detailFactor || !!selectedPrecedent || !!drawerItem || !!deletingId || !!historyId;
     document.body.style.overflow = anyDrawerOpen ? "hidden" : "";
     return () => { document.body.style.overflow = ""; };
-  }, [detailFactor, selectedPrecedent, drawerItem]);
+  }, [detailFactor, selectedPrecedent, drawerItem, deletingId, historyId]);
   // Preview/Insights workspace for the drawer's documents (separate from the
   // Verified Damage Evidence workspace below).
   const [ecoWsView, setEcoWsView] = useState<"preview" | "insights" | null>(null);
@@ -2339,7 +3083,7 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
             onClick={() => { setCompTab("economic"); scrollTo(economicRef); }}
             className="rounded-xl border border-line bg-offwhite p-4 text-left transition-all hover:border-brand hover:bg-tint hover:shadow-sm"
           >
-            <div className="text-xl font-bold text-ink tabular-nums">{formatUSD(model.economicTotal)}</div>
+            <div className="text-xl font-bold text-ink tabular-nums">{formatUSD(economicTotal)}</div>
             <div className="eyebrow mt-1">Economic Damages</div>
           </button>
 
@@ -2382,7 +3126,7 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
         <h2 className="section-header">Damages Summary</h2>
         <div className="bg-tint border border-[#D6F2F7] rounded-xl p-5 space-y-4">
           <p className="body-text leading-relaxed">
-            Verified economic damages total <strong className="font-semibold text-ink">{formatUSD(model.economicTotal)}</strong>, supported by
+            Verified economic damages total <strong className="font-semibold text-ink">{formatUSD(economicTotal)}</strong>, supported by
             medical records, billing statements, employment records, and rehabilitation documentation.
           </p>
           <p className="body-text leading-relaxed">
@@ -2411,8 +3155,8 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
         {/* Tabs — Economic · Non-Economic */}
         <div className="flex items-center gap-2 mb-5">
           {([
-            { key: "economic", label: "Economic Damages", count: ECONOMIC.length },
-            { key: "noneconomic", label: "Non-Economic Damages", count: DA_DAMAGE_FACTORS.length },
+            { key: "economic", label: "Economic Damages", count: economicRows.length },
+            { key: "noneconomic", label: "Non-Economic Damages", count: DA_DAMAGE_FACTORS.length + nonEconomicRows.length },
           ] as const).map((t) => {
             const active = compTab === t.key;
             return (
@@ -2438,41 +3182,45 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
           <div className="border border-line rounded-xl overflow-hidden">
             <div className="bg-tint px-5 py-3 border-b border-line flex items-center justify-between gap-3">
               <h3 className="card-title">Economic Damages</h3>
-              <span className="pill pill-progress shrink-0">Verified</span>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="pill pill-progress">Verified</span>
+                {damages && (
+                  <button
+                    onClick={() => openAdd("economic")}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-line bg-white text-xs font-semibold text-deep hover:border-brand hover:bg-white transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5" strokeWidth={2} /> Add Damage
+                  </button>
+                )}
+              </div>
             </div>
             <div className="p-5">
+              {addingTo === "economic" && (
+                <div className="mb-4">
+                  <DamageForm
+                    title="Add Economic Damage"
+                    draft={addDraft}
+                    setDraft={setAddDraft}
+                    onCancel={() => setAddingTo(null)}
+                    onSave={() => addDamage(addDraft)}
+                    saveLabel="Add Damage"
+                  />
+                </div>
+              )}
               <div className="divide-y divide-line">
-                {ECONOMIC.map((e) => {
-                  const open = ecoRowsOpen.has(e.label);
-                  return (
-                    <div key={e.label} className="py-2.5">
-                      <div className="flex items-center justify-between gap-3">
-                        <button onClick={() => toggleEcoRow(e.label)} aria-expanded={open} className="flex items-center gap-3 text-left min-w-0">
-                          <div className="w-8 h-8 rounded-lg bg-tint flex items-center justify-center shrink-0">
-                            <e.icon className="w-4 h-4 text-deep" strokeWidth={1.75} />
-                          </div>
-                          <span className="body-text truncate">{e.label}</span>
-                          <ChevronDown className={`w-4 h-4 text-[#5B6B78] shrink-0 transition-transform ${open ? "rotate-180" : ""}`} strokeWidth={1.75} />
-                        </button>
-                        <span className="text-sm font-medium text-ink tabular-nums shrink-0">{formatUSD(e.value)}</span>
-                      </div>
-                      {open && (
-                        <div className="mt-2.5 ml-11 rounded-xl border border-line bg-white p-3.5 flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="secondary-text">{e.reasoning}</p>
-                            <div className="flex items-center gap-1.5 mt-1.5 text-xs text-[#5B6B78]">
-                              <FileText className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
-                              We considered {e.docs[0]} and {e.docCount - 1}+ more documents.
-                            </div>
-                          </div>
-                          <button onClick={() => openDrawer(e)} className="shrink-0 text-sm font-semibold text-deep hover:text-ink transition-colors whitespace-nowrap">
-                            View details →
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                {economicRows.map((e) => (
+                  <DamageRow
+                    key={e.item.id}
+                    row={e}
+                    open={ecoRowsOpen.has(e.label)}
+                    onToggle={() => toggleEcoRow(e.label)}
+                    onDetails={() => openDrawer(e)}
+                    {...rowActions(e.item)}
+                  />
+                ))}
+                {economicRows.length === 0 && (
+                  <p className="secondary-text py-2.5">No economic damages are on file.</p>
+                )}
               </div>
               <div className="mt-3 pt-3 border-t-2 border-line flex items-center justify-between">
                 <span className="text-sm font-semibold text-ink">Economic Damages Subtotal</span>
@@ -2490,6 +3238,52 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
               {anyOverride && <span className="pill pill-progress"><Pencil className="w-3.5 h-3.5" strokeWidth={1.75} /> Attorney-adjusted</span>}
             </div>
             <div className="p-5 space-y-6">
+              {damages && nonEconomicRows.length === 0 && addingTo !== "noneconomic" && (
+                <button
+                  onClick={() => openAdd("noneconomic")}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-line bg-white text-xs font-semibold text-deep hover:border-brand transition-colors"
+                >
+                  <Plus className="w-3.5 h-3.5" strokeWidth={2} /> Add Damage
+                </button>
+              )}
+              {/* Itemised non-economic damages. Empty until a damage is placed
+                  here, so the multiplier workspace stays the default view. */}
+              {(nonEconomicRows.length > 0 || addingTo === "noneconomic") && (
+                <div className="rounded-xl border border-line p-4">
+                  <div className="flex items-center justify-between gap-3 mb-2.5">
+                    <h4 className="card-title">Itemised Non-Economic Damages</h4>
+                    <span className="text-sm font-bold text-ink tabular-nums shrink-0">{formatUSD(nonEconomicItemsTotal)}</span>
+                  </div>
+                  {addingTo === "noneconomic" && (
+                    <div className="mb-3">
+                      <DamageForm
+                        title="Add Non-Economic Damage"
+                        draft={addDraft}
+                        setDraft={setAddDraft}
+                        onCancel={() => setAddingTo(null)}
+                        onSave={() => addDamage(addDraft)}
+                        saveLabel="Add Damage"
+                      />
+                    </div>
+                  )}
+                  <div className="divide-y divide-line">
+                    {nonEconomicRows.map((e) => (
+                      <DamageRow
+                        key={e.item.id}
+                        row={e}
+                        open={ecoRowsOpen.has(e.label)}
+                        onToggle={() => toggleEcoRow(e.label)}
+                        onDetails={() => openDrawer(e)}
+                        {...rowActions(e.item)}
+                      />
+                    ))}
+                  </div>
+                  <p className="secondary-text mt-2.5">
+                    Itemised amounts are added to the multiplier-derived figure below.
+                  </p>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="bg-tint border border-[#D6F2F7] rounded-xl p-4">
                   <div className="eyebrow mb-1">Recommended Multiplier</div>
@@ -2651,6 +3445,10 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
 
           )}
 
+          {/* One trail for the whole damage record, so it is reachable from
+              either tab whoever made the change. */}
+          <DamageEditHistory audit={damageAudit} />
+
           {/* Total Estimated Settlement — stays below both tabs (recalculates live) */}
           <div className="bg-ink rounded-xl px-5 py-4 flex items-center justify-between gap-4">
             <div className="min-w-0">
@@ -2659,9 +3457,14 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
                 {formatUSD(economicTotal)} <span className="text-brand">+</span> {formatUSD(nonEconomicTotal)}
               </div>
             </div>
-            <div className="text-white font-bold tabular-nums shrink-0" style={{ fontSize: "24px", lineHeight: 1.1, letterSpacing: "-0.01em" }}>
-              {formatUSD(recommendedSettlement)}
-            </div>
+            <SettlementExplainer
+              economic={economicTotal}
+              nonEconomic={nonEconomicTotal}
+              total={recommendedSettlement}
+              multiplier={overallMult}
+              itemisedNonEconomic={nonEconomicItemsTotal}
+              factors={DA_STRATEGY_FACTORS}
+            />
           </div>
         </div>
       </div>
@@ -2875,6 +3678,28 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
       onClose={() => setWsOpen(false)}
       onDownload={() => {}}
     />
+
+    {/* Attorney damage editing — confirmation before a delete, and the change
+        history for one damage. Both are dismissible and change nothing on open. */}
+    {deleting && damages && (
+      <DeleteDamageDialog
+        item={deleting}
+        onCancel={() => setDeletingId(null)}
+        onConfirm={() => {
+          damages.deleteDamage(deleting.id, actor, "Deleted by attorney on the Damages Analysis stage.");
+          setDeletingId(null);
+          // The form was opened on a damage that no longer exists.
+          setEditingId((id) => (id === deleting.id ? null : id));
+        }}
+      />
+    )}
+    {historyItem && damages && (
+      <DamageHistoryDrawer
+        item={historyItem}
+        entries={damages.historyFor(historyItem.id)}
+        onClose={() => setHistoryId(null)}
+      />
+    )}
 
     {/* Economic line-item detail drawer — itemized, evidence-backed breakdown */}
     {drawerItem && (
