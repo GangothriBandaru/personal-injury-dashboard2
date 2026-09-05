@@ -20,7 +20,7 @@ import {
 } from "./chronologyActions";
 import { useChronologyOptional, versionStamp, type ChronVersion } from "../chronology/ChronologyContext";
 import {
-  useDamagesOptional, aiActor, formatDamageUSD, DAMAGE_FIELD_LABEL,
+  useDamagesOptional, aiActor, formatDamageUSD, isEconomicCategory, DAMAGE_FIELD_LABEL,
   type DamageItem, type FieldChange,
 } from "../damages/DamagesContext";
 import {
@@ -1206,6 +1206,9 @@ export function AssistantPanel() {
       {
         id, label: prop.label, bucket: prop.bucket, amount: prop.amount,
         description: prop.description, category: prop.category, reasoning: prop.reasoning,
+        // A damage the assistant adds is filed under Other Expenses unless it
+        // names one of the case's own categories.
+        group: isEconomicCategory(prop.label) ? prop.label : "Other Expenses",
         docs: prop.docs, docCount: prop.docs.length, iconKey: "receipt",
         // Created through the attorney's instruction to the assistant, and not
         // yet backed by verified evidence — provenance and verification are

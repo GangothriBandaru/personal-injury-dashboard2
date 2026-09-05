@@ -18,9 +18,16 @@ import {
   type Provenance, type ChronVersion, type ChronAddition, type ChronOverride,
 } from "../chronology/ChronologyContext";
 import {
-  useDamagesOptional, attorneyActor, formatDamageUSD,
+  useFactorsOptional, attorneyFactorActor, SEVERITY_RANGE,
+  FACTOR_SEED, FACTOR_PROVENANCE_LABEL, FACTOR_ACTION_LABEL,
+  type FactorItem, type FactorProvenance, type Severity,
+} from "../damages/FactorsContext";
+import { FactorReasoning } from "./FactorReasoning";
+import {
+  useDamagesOptional, attorneyActor, formatDamageUSD, ECONOMIC_CATEGORIES,
   DAMAGE_SEED, DAMAGE_PROVENANCE_LABEL, DAMAGE_ACTION_LABEL, DAMAGE_FIELD_LABEL, BUCKET_LABEL,
-  type DamageAudit, type DamageBucket, type DamageItem, type DamageProvenance, type FieldChange,
+  type DamageAudit, type DamageBucket, type DamageItem, type DamageProvenance,
+  type EconomicCategory, type FieldChange,
 } from "../damages/DamagesContext";
 import { InjuryIntelligenceSection } from "../components/InjuryIntelligenceSection";
 
@@ -1915,109 +1922,20 @@ const DEFENSE_PILL: Record<string, string> = {
   Weak: "pill pill-complete",
 };
 
-// The allowable per-severity multiplier band (min–max). Presets in the editor
-// and the displayed range both derive from this.
-const SEVERITY_RANGE: Record<string, [number, number]> = {
-  Critical: [2, 3],
-  High: [1, 1.5],
-  Moderate: [0.5, 1],
-  Low: [0.25, 0.5],
-};
-
 // Format a multiplier value cleanly (2 → "2×", 1.25 → "1.25×").
 function fmtMult(m: number) {
   return `${Number(m.toFixed(2))}×`;
 }
 
-export type Severity = "Critical" | "High" | "Moderate" | "Low";
-export type DamageFactor = {
-  category: string;
-  severity: Severity;
-  aiMultiplier: number;   // AI-recommended contribution to the overall multiplier
-  confidence: number;     // AI confidence %
-  docCount: number;
-  drivers: string[];      // 3–5 top contributing-evidence bullets
-  aiReasoning: string;    // narrative behind the recommendation
-  rationale: string;
-  evidence: {
-    strength: "Strong" | "Moderate" | "Limited";
-    primaryRecords: number;
-    expertOpinions: number;
-    witnessStatements: number;
-    medicalQuality: "Excellent" | "Strong" | "Adequate" | "Limited";
-  };
-  defense: { argument: string; strength: "Strong" | "Moderate" | "Weak"; rebuttal: string };
-  suggestion: { evidence: string; why: string; multiplierGain: number };
-};
+// Severity, the multiplier bands and the factor shape now live with the factors
+// store, so the stage and the store cannot drift apart.
+export type { Severity } from "../damages/FactorsContext";
+export type DamageFactor = FactorItem;
 
-// Non-economic damage factors the recommended multiplier is applied to. Each
-// carries an AI-assigned severity, a recommended contribution, the evidence
-// behind it, and the strongest opposing argument. AI contributions sum to 9×.
-export const DA_DAMAGE_FACTORS: DamageFactor[] = [
-  {
-    category: "Pain & Suffering", severity: "Critical", aiMultiplier: 2, confidence: 94, docCount: 18,
-    drivers: ["Permanent Injury", "Surgical Intervention", "Chronic Pain", "MRI Verified"],
-    aiReasoning: "Two-level cervical herniation with nerve-root compression, a completed surgical course, and treating-physician records showing persistent chronic pain place this factor at the top of the Critical band.",
-    rationale: "Treating-physician records document persistent, chronic pain requiring ongoing pain-management intervention.",
-    evidence: { strength: "Strong", primaryRecords: 11, expertOpinions: 3, witnessStatements: 4, medicalQuality: "Excellent" },
-    defense: { argument: "Insurer will likely argue pre-existing degenerative changes contributed to the cervical findings, discounting causation.", strength: "Weak", rebuttal: "Cite the pre-incident baseline MRI and the treating surgeon's causation opinion tying the herniation to the collision." },
-    suggestion: { evidence: "Pain-management specialist narrative report", why: "A dedicated specialist narrative would corroborate the permanence of chronic pain and anchor the top of the Critical band.", multiplierGain: 0.25 },
-  },
-  {
-    category: "Emotional Distress", severity: "High", aiMultiplier: 1.25, confidence: 86, docCount: 7,
-    drivers: ["Diagnosed Anxiety", "Post-Traumatic Symptoms", "Sleep Disturbance"],
-    aiReasoning: "Primary-care and counseling notes corroborate diagnosed anxiety and post-traumatic symptoms; a formal mental-health evaluation would further anchor the higher end of the band.",
-    rationale: "Mental-health evaluations corroborate diagnosed anxiety and post-traumatic symptoms tied to the incident.",
-    evidence: { strength: "Moderate", primaryRecords: 4, expertOpinions: 1, witnessStatements: 2, medicalQuality: "Adequate" },
-    defense: { argument: "Insurer will argue emotional symptoms are unquantified and lack a dedicated psychological evaluation.", strength: "Moderate", rebuttal: "Obtain a licensed psychologist's evaluation with standardized testing to convert lay complaints into diagnostic findings." },
-    suggestion: { evidence: "Mental Health Evaluation", why: "A formal psychological evaluation would quantify the distress diagnostically and strengthen Emotional Distress.", multiplierGain: 0.5 },
-  },
-  {
-    category: "Quality of Life", severity: "High", aiMultiplier: 1.25, confidence: 88, docCount: 9,
-    drivers: ["Loss of Independence", "Abandoned Hobbies", "Reduced Activity"],
-    aiReasoning: "Functional-capacity assessments show a durable loss of independence in daily activities and recreation attributable to the injuries.",
-    rationale: "Functional-capacity assessments show a sustained loss of independence in daily activities and prior hobbies.",
-    evidence: { strength: "Strong", primaryRecords: 5, expertOpinions: 2, witnessStatements: 2, medicalQuality: "Strong" },
-    defense: { argument: "Insurer will contend the plaintiff has partially resumed activities, limiting the loss claimed.", strength: "Weak", rebuttal: "Present the functional-capacity evaluation and before/after activity logs documenting the sustained limitations." },
-    suggestion: { evidence: "Day-in-the-life video", why: "A day-in-the-life record vividly documents the ongoing functional loss for a jury.", multiplierGain: 0.25 },
-  },
-  {
-    category: "Cognitive Impairment", severity: "Critical", aiMultiplier: 2, confidence: 92, docCount: 11,
-    drivers: ["Neuropsych Testing", "Memory Deficit", "Slowed Processing", "Employment Impact"],
-    aiReasoning: "Neuropsychological testing confirms measurable deficits in memory, attention, and processing speed, objectively supporting a Critical placement.",
-    rationale: "Neuropsychological testing confirms measurable deficits in memory, attention, and processing speed.",
-    evidence: { strength: "Strong", primaryRecords: 6, expertOpinions: 3, witnessStatements: 2, medicalQuality: "Excellent" },
-    defense: { argument: "Insurer will argue cognitive testing is subject to effort validity and attribute deficits to unrelated factors.", strength: "Moderate", rebuttal: "Rely on embedded validity indicators in the neuropsych battery and the neurologist's causation opinion." },
-    suggestion: { evidence: "Vocational expert assessment", why: "A vocational assessment would translate the cognitive deficits into concrete earning-capacity loss.", multiplierGain: 0.25 },
-  },
-  {
-    category: "Physical Impairment", severity: "High", aiMultiplier: 1.25, confidence: 90, docCount: 14,
-    drivers: ["Mobility Restriction", "Reduced Range of Motion", "Orthopedic Findings"],
-    aiReasoning: "Imaging and orthopedic findings verify permanent mobility restrictions and reduced range of motion consistent with the injury mechanism.",
-    rationale: "Imaging and orthopedic findings verify permanent mobility restrictions and reduced range of motion.",
-    evidence: { strength: "Strong", primaryRecords: 8, expertOpinions: 2, witnessStatements: 4, medicalQuality: "Strong" },
-    defense: { argument: "Insurer will argue impairment ratings fall within functional ranges permitting most activities.", strength: "Weak", rebuttal: "Present the AMA impairment rating and the treating orthopedist's permanency opinion." },
-    suggestion: { evidence: "Independent medical exam rebuttal", why: "A retained-expert IME rebuttal would neutralize a low defense impairment rating.", multiplierGain: 0.25 },
-  },
-  {
-    category: "Dignity & Independence", severity: "Moderate", aiMultiplier: 0.75, confidence: 79, docCount: 5,
-    drivers: ["Assistive Care", "Lost Self-Care Autonomy"],
-    aiReasoning: "Care records show reliance on assistive help for routine self-care tasks, meaningfully reducing personal autonomy.",
-    rationale: "Reliance on assistive care for routine self-care tasks meaningfully reduces personal autonomy.",
-    evidence: { strength: "Moderate", primaryRecords: 2, expertOpinions: 1, witnessStatements: 2, medicalQuality: "Adequate" },
-    defense: { argument: "Insurer will argue assistive-care needs are temporary and expected to resolve with recovery.", strength: "Moderate", rebuttal: "Present the life-care plan projecting long-term assistive-care needs beyond the recovery window." },
-    suggestion: { evidence: "Occupational therapy assessment", why: "An OT assessment documents the durable loss of self-care independence.", multiplierGain: 0.25 },
-  },
-  {
-    category: "Family Relationship Impact", severity: "Moderate", aiMultiplier: 0.5, confidence: 76, docCount: 4,
-    drivers: ["Caregiving Burden", "Loss of Consortium"],
-    aiReasoning: "Family statements document a caregiving burden and loss of consortium; corroboration is primarily lay testimony.",
-    rationale: "Family statements document caregiving burden and loss of consortium within the household.",
-    evidence: { strength: "Limited", primaryRecords: 1, expertOpinions: 0, witnessStatements: 3, medicalQuality: "Limited" },
-    defense: { argument: "Insurer will argue consortium claims rest largely on lay testimony without independent corroboration.", strength: "Strong", rebuttal: "Corroborate with a family-therapist evaluation and contemporaneous caregiving records." },
-    suggestion: { evidence: "Spousal/family declarations", why: "Sworn declarations from household members would independently corroborate the consortium loss.", multiplierGain: 0.25 },
-  },
-];
+// The factors the AI put on the case, as first recorded. The stage reads the
+// live store; this is what module-level consumers (the demand-package builder)
+// read, and what the store seeds itself from.
+export const DA_DAMAGE_FACTORS: DamageFactor[] = FACTOR_SEED;
 
 // Why LECO recommends the 9× multiplier.
 const DA_STRATEGY_FACTORS = ["Clear Liability", "Severe Injuries", "Strong Supporting Evidence", "Favorable Jurisdiction"];
@@ -2351,7 +2269,9 @@ interface DamageDraft {
   reasoning: string;
   notes: string;
   docs: string;
-  bucket: DamageBucket;
+  /** The economic category the damage is filed under. Whether it is economic
+   *  or non-economic at all is a separate thing, and not edited here. */
+  group: EconomicCategory;
 }
 
 const draftOf = (d: DamageItem): DamageDraft => ({
@@ -2362,11 +2282,11 @@ const draftOf = (d: DamageItem): DamageDraft => ({
   reasoning: d.reasoning,
   notes: d.notes ?? "",
   docs: d.docs.join(", "),
-  bucket: d.bucket,
+  group: d.group,
 });
 
-const blankDraft = (bucket: DamageBucket): DamageDraft => ({
-  label: "", category: "", amount: "", description: "", reasoning: "", notes: "", docs: "", bucket,
+const blankDraft = (group: EconomicCategory = "Other Expenses"): DamageDraft => ({
+  label: "", category: "", amount: "", description: "", reasoning: "", notes: "", docs: "", group,
 });
 
 const parseDocs = (s: string) => s.split(",").map((d) => d.trim()).filter(Boolean);
@@ -2397,6 +2317,159 @@ function Field({
       )}
       {hint && <p className="text-[11px] text-[#8A98A3] mt-1">{hint}</p>}
     </div>
+  );
+}
+
+// ── The damage-factor form ───────────────────────────────────────────────────
+// One shape for editing a factor and for creating one, so the two forms cannot
+// come apart. The multiplier itself is held separately, because the drawer's
+// existing preset buttons and settlement preview already drive it.
+
+interface FactorDraft {
+  name: string;
+  description: string;
+  severity: Severity;
+  rangeLow: string;
+  rangeHigh: string;
+}
+
+const draftOfFactor = (f: FactorItem): FactorDraft => ({
+  name: f.category,
+  description: f.rationale,
+  severity: f.severity,
+  rangeLow: String(f.range[0]),
+  rangeHigh: String(f.range[1]),
+});
+
+// A new factor starts on the Moderate band, which is what its severity implies.
+const blankFactorDraft = (): FactorDraft => ({
+  name: "",
+  description: "",
+  severity: "Moderate",
+  rangeLow: String(SEVERITY_RANGE.Moderate[0]),
+  rangeHigh: String(SEVERITY_RANGE.Moderate[1]),
+});
+
+// The band as entered, kept the right way round and never negative.
+const draftRange = (d: FactorDraft): [number, number] => {
+  const lo = Math.max(0, Number(d.rangeLow) || 0);
+  const hi = Math.max(0, Number(d.rangeHigh) || 0);
+  return lo <= hi ? [lo, hi] : [hi, lo];
+};
+
+// Severity → pill, reusing the stage's own status palette.
+const FACTOR_PROVENANCE_PILL: Record<FactorProvenance, string> = {
+  "ai-generated": "pill pill-neutral",
+  "ai-modified": "pill pill-neutral",
+  "user-created": "pill pill-progress",
+  "user-modified": "pill pill-progress",
+};
+
+function FactorProvenanceBadge({ provenance }: { provenance: FactorProvenance }) {
+  const Icon = provenance.startsWith("ai") ? Sparkles : UserPlus;
+  return (
+    <span className={FACTOR_PROVENANCE_PILL[provenance]}>
+      <Icon className="w-3 h-3" strokeWidth={1.75} /> {FACTOR_PROVENANCE_LABEL[provenance]}
+    </span>
+  );
+}
+
+// Removing a factor changes the multiplier, so it is always confirmed.
+function DeleteFactorDialog({
+  factor, impact, onCancel, onConfirm,
+}: { factor: FactorItem; impact: string; onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <>
+      <div className="fixed inset-0 bg-ink/40 z-[80]" onClick={onCancel} />
+      <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[80] w-[440px] max-w-[92vw] rounded-2xl border border-line bg-white shadow-xl p-5">
+        <div className="flex items-center gap-2 mb-2.5">
+          <AlertTriangle className="w-4 h-4 text-[#B42318] shrink-0" strokeWidth={1.75} />
+          <h3 className="card-title">Delete Damage Factor?</h3>
+        </div>
+        <p className="body-text leading-relaxed">
+          Are you sure you want to remove &ldquo;<span className="font-semibold">{factor.category}</span>&rdquo;?
+        </p>
+        <p className="secondary-text leading-relaxed mt-2">
+          Removing this factor will lower the recommended multiplier by {fmtMult(factor.multiplier)} and reduce
+          the estimated non-economic damages. {impact}
+        </p>
+        <div className="flex items-center justify-end gap-2 mt-4">
+          <button onClick={onCancel} className="btn btn-secondary px-3 py-2 text-sm">Cancel</button>
+          <button
+            onClick={onConfirm}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold text-white bg-[#B42318] hover:bg-[#96200F] transition-colors"
+          >
+            <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} /> Delete Factor
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// One factor's change history, in the drawer pattern the stage already uses.
+function FactorHistoryDrawer({
+  factor, entries, onClose,
+}: { factor: FactorItem; entries: { id: string; action: string; previous?: string; next?: string; changedBy: string; at: string; reason?: string }[]; onClose: () => void }) {
+  const newestFirst = [...entries].reverse();
+  return (
+    <>
+      <div className="fixed inset-0 bg-ink/40 z-[70]" onClick={onClose} />
+      <div className="fixed top-0 right-0 h-full w-[440px] max-w-[92vw] bg-white shadow-xl z-[70] flex flex-col">
+        <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-line shrink-0">
+          <div className="min-w-0">
+            <div className="eyebrow mb-1">Damage Factor History</div>
+            <h2 className="card-title">{factor.category}</h2>
+            <div className="mono-ref mt-1">{fmtMult(factor.multiplier)} · {factor.severity}</div>
+          </div>
+          <button onClick={onClose} title="Close" className="p-1.5 hover:bg-tint rounded-lg transition-colors shrink-0">
+            <X className="w-5 h-5 text-[#5B6B78]" strokeWidth={1.75} />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-5">
+          {newestFirst.length === 0 ? (
+            <p className="secondary-text">
+              No changes recorded. This factor is as the AI first assessed it.
+            </p>
+          ) : (
+            <div className="relative">
+              {newestFirst.map((e, i) => (
+                <div key={e.id} className="relative flex gap-3 pb-6 last:pb-0">
+                  <div className="flex flex-col items-center shrink-0">
+                    <div className="w-2.5 h-2.5 rounded-full bg-white border-2 border-brand mt-1.5" />
+                    {i < newestFirst.length - 1 && <div className="w-px flex-1 bg-line mt-1.5" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-semibold text-ink">
+                        {FACTOR_ACTION_LABEL[e.action as keyof typeof FACTOR_ACTION_LABEL] ?? e.action}
+                      </span>
+                      <span className="mono-ref">{e.at}</span>
+                    </div>
+                    <p className="text-xs text-[#8A98A3] mt-0.5">{e.changedBy}</p>
+                    {(e.previous || e.next) && (
+                      <div className="rounded-xl border border-line mt-2 px-3.5 py-2">
+                        <div className="flex items-center gap-2 flex-wrap body-text">
+                          {e.previous && <span className="text-[#5B6B78]">{e.previous}</span>}
+                          {e.previous && e.next && <ArrowRight className="w-3.5 h-3.5 text-[#8A98A3] shrink-0" strokeWidth={1.75} />}
+                          {e.next && <span className="font-semibold text-ink">{e.next}</span>}
+                        </div>
+                      </div>
+                    )}
+                    {e.reason && (
+                      <div className="rounded-xl border border-line mt-2 px-3.5 py-2">
+                        <div className="eyebrow mb-0.5">Reason</div>
+                        <p className="body-text leading-relaxed">{e.reason}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -2433,13 +2506,13 @@ function DamageForm({
         <div>
           <label className="eyebrow block mb-1">Bucket</label>
           <select
-            value={draft.bucket}
+            value={draft.group}
             disabled={lockBucket}
-            onChange={(e) => setDraft({ ...draft, bucket: e.target.value as DamageBucket })}
+            onChange={(e) => setDraft({ ...draft, group: e.target.value as EconomicCategory })}
             className="w-full rounded-lg border border-line bg-white px-2.5 py-1.5 text-sm text-ink focus:outline-none focus:border-brand transition-colors disabled:text-[#8A98A3]"
           >
-            {(Object.keys(BUCKET_LABEL) as DamageBucket[]).map((b) => (
-              <option key={b} value={b}>{BUCKET_LABEL[b]}</option>
+            {ECONOMIC_CATEGORIES.map((c) => (
+              <option key={c} value={c}>{c}</option>
             ))}
           </select>
         </div>
@@ -2779,6 +2852,21 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
   const subtotal = economicRows.reduce((s, e) => s + e.value, 0);
   const nonEconomicItemsTotal = nonEconomicRows.reduce((s, e) => s + e.value, 0);
 
+  // Economic damages sit under the six categories, in the stage's own order. A
+  // category holding a single damage of the same name shows no heading — there
+  // is nothing a heading would tell the attorney that the row does not.
+  const economicGroups = ECONOMIC_CATEGORIES
+    .map((category) => {
+      const rows = economicRows.filter((e) => e.item.group === category);
+      return {
+        category,
+        rows,
+        subtotal: rows.reduce((sum, e) => sum + e.value, 0),
+        heading: rows.length > 1 || (rows.length === 1 && rows[0].label !== category),
+      };
+    })
+    .filter((g) => g.rows.length > 0);
+
   // ── Attorney editing ─────────────────────────────────────────────────────
   // Which row is in edit mode, which is pending deletion, whose history is
   // open, and whether the add form is showing. Every handler below goes through
@@ -2788,7 +2876,7 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [historyId, setHistoryId] = useState<string | null>(null);
   const [addingTo, setAddingTo] = useState<DamageBucket | null>(null);
-  const [addDraft, setAddDraft] = useState<DamageDraft>(blankDraft("economic"));
+  const [addDraft, setAddDraft] = useState<DamageDraft>(blankDraft());
   const actor = attorneyActor(CURRENT_USER);
   const deleting = damages?.items.find((i) => i.id === deletingId) ?? null;
   const historyItem = damages?.items.find((i) => i.id === historyId) ?? null;
@@ -2817,6 +2905,12 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
     note(DAMAGE_FIELD_LABEL.reasoning, item.reasoning, next.reasoning!);
     note(DAMAGE_FIELD_LABEL.notes, item.notes ?? "", next.notes ?? "");
     note(DAMAGE_FIELD_LABEL.docs, item.docs.join(", "), next.docs!.join(", "));
+    // Re-filing a damage under another category is a change to the record like
+    // any other, so it is diffed and recorded here rather than specially.
+    if (item.bucket === "economic") {
+      next.group = draft.group;
+      note(DAMAGE_FIELD_LABEL.group, item.group, draft.group);
+    }
 
     // A damage that now cites a different set of documents should say so in its
     // count, but never below the number it actually lists.
@@ -2826,10 +2920,6 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
 
     if (changes.length > 0) {
       damages.updateDamage(item.id, next, changes, actor, "Edited by attorney on the Damages Analysis stage.");
-    }
-    // The bucket is a move, not a field edit, so it keeps its own trail entry.
-    if (draft.bucket !== item.bucket) {
-      damages.moveDamage(item.id, draft.bucket, actor, "Moved by attorney on the Damages Analysis stage.");
     }
     setEditingId(null);
   };
@@ -2841,7 +2931,10 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
       {
         id: `damage-${Math.round(performance.now())}-${Math.random().toString(36).slice(2, 6)}`,
         label: draft.label.trim(),
-        bucket: draft.bucket,
+        // The add form is opened against a bucket; within Economic Damages the
+        // form's own category decides which heading it files under.
+        bucket: addingTo ?? "economic",
+        group: draft.group,
         amount: parseMoney(draft.amount),
         description: draft.description,
         category: draft.category.trim() || draft.label.trim(),
@@ -2861,7 +2954,7 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
   };
 
   const openAdd = (bucket: DamageBucket) => {
-    setAddDraft(blankDraft(bucket));
+    setAddDraft(blankDraft());
     setEditingId(null);
     setAddingTo(bucket);
   };
@@ -2891,10 +2984,11 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
 
   // ── Damage-factor review workspace: per-factor multiplier (attorney-editable),
   // override history, edit drawer, and expandable detail/defence sections. ──
-  const [factorMult, setFactorMult] = useState<Record<string, number>>(() =>
-    Object.fromEntries(DA_DAMAGE_FACTORS.map((f) => [f.category, f.aiMultiplier])));
-  type FactorEdit = { from: number; to: number; note: string; at: string };
-  const [factorHistory, setFactorHistory] = useState<Record<string, FactorEdit[]>>({});
+  // The factors, live. Editing, adding and removing one all go through the
+  // store, which is also what the recommended multiplier is summed from.
+  const factorsStore = useFactorsOptional();
+  const factors: FactorItem[] = factorsStore?.factors ?? FACTOR_SEED;
+  const factorActor = attorneyFactorActor(CURRENT_USER);
 
   // Editing happens inline inside the View Details drawer.
   const [editMode, setEditMode] = useState(false);
@@ -2902,8 +2996,12 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
   const [draftNote, setDraftNote] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
   // When an override was last made, per factor (e.g. "Today • 3:42 PM").
-  const [modifiedAt, setModifiedAt] = useState<Record<string, string>>({});
-  const nowStamp = () => `Today • ${new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
+  // When a factor was last changed, read off its own trail rather than tracked
+  // separately — one source, so the two can never disagree.
+  const lastChangedAt = (id: string) => {
+    const trail = factorsStore?.historyFor(id) ?? [];
+    return trail.length > 0 ? trail[trail.length - 1].at : undefined;
+  };
   // "View Details" drawer for a damage factor.
   const [detailFactor, setDetailFactor] = useState<string | null>(null);
   const [detailDocsOpen, setDetailDocsOpen] = useState(false);
@@ -2918,59 +3016,118 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
   const [factorWsFocus, setFactorWsFocus] = useState<string | null>(null);
   const openFactorWs = (cat: string, view: "preview" | "insights") => { setFactorWsCat(cat); setFactorWsView(view); setFactorWsFocus(null); };
   const openFactorDoc = (cat: string, docName: string) => { setFactorWsCat(cat); setFactorWsView("preview"); setFactorWsFocus(docName); };
-  const factorByCat = (cat: string) => DA_DAMAGE_FACTORS.find((f) => f.category === cat)!;
-  const currentMult = (cat: string) => factorMult[cat] ?? factorByCat(cat).aiMultiplier;
+  // Factors are addressed by id, so a rename never loses the thread. The
+  // evidence workspace below is keyed by name, so it gets its own lookup.
+  const factorById = (id: string) => factors.find((f) => f.id === id);
+  const factorByCat = (cat: string) => factors.find((f) => f.category === cat) ?? factors[0];
+  const currentMult = (id: string) => factorById(id)?.multiplier ?? 0;
 
   // Live recalculation — the overall multiplier is the sum of factor
   // contributions, applied to the economic damages actually on file. Every
   // dependent figure below derives from these two, so nothing goes stale when a
   // damage is edited, added, moved or deleted.
   const economicTotal = subtotal;
-  const aiOverall = DA_DAMAGE_FACTORS.reduce((s, f) => s + f.aiMultiplier, 0);
-  const overallMult = DA_DAMAGE_FACTORS.reduce((s, f) => s + currentMult(f.category), 0);
+  const aiOverall = factors.reduce((s, f) => s + f.aiMultiplier, 0);
+  const overallMult = factors.reduce((s, f) => s + f.multiplier, 0);
   // Itemised non-economic damages sit alongside the multiplier-derived figure.
   const nonEconomicTotal = Math.round(economicTotal * overallMult) + nonEconomicItemsTotal;
   const recommendedSettlement = economicTotal + nonEconomicTotal;
   const aiRecommendedSettlement = economicTotal + Math.round(economicTotal * aiOverall) + nonEconomicItemsTotal;
   const settlementForOverall = (m: number) => economicTotal + Math.round(economicTotal * m) + nonEconomicItemsTotal;
-  const hasOverride = (cat: string) => currentMult(cat) !== factorByCat(cat).aiMultiplier;
-  const anyOverride = DA_DAMAGE_FACTORS.some((f) => hasOverride(f.category));
+  const hasOverride = (id: string) => {
+    const f = factorById(id);
+    return !!f && f.multiplier !== f.aiMultiplier;
+  };
+  const anyOverride = factors.some((f) => f.multiplier !== f.aiMultiplier);
 
-  // Open the View Details drawer (read mode); AI summary open, suggestions closed.
-  const openDetail = (cat: string) => {
-    setDetailFactor(cat); setEditMode(false); setDraftMult(currentMult(cat)); setDraftNote("");
+  // The whole factor, as the form holds it. The same shape serves editing an
+  // existing factor and creating a new one, so the two cannot drift apart.
+  const [factorDraft, setFactorDraft] = useState<FactorDraft>(() => blankFactorDraft());
+  const [creatingFactor, setCreatingFactor] = useState(false);
+  const [deletingFactorId, setDeletingFactorId] = useState<string | null>(null);
+  const [factorHistoryId, setFactorHistoryId] = useState<string | null>(null);
+  const deletingFactor = factors.find((f) => f.id === deletingFactorId) ?? null;
+  const factorHistoryItem = factors.find((f) => f.id === factorHistoryId) ?? null;
+
+  // Open the reasoning drawer (read mode) — understanding, not changing.
+  const openDetail = (id: string) => {
+    setDetailFactor(id); setEditMode(false); setCreatingFactor(false);
+    setDraftMult(currentMult(id)); setDraftNote("");
     setDetailDocsOpen(false); setDetailChatOpen(false);
   };
-  // Open the drawer straight into inline edit mode (from a card's Edit button).
-  const openEditDrawer = (cat: string) => {
-    setDetailFactor(cat); setEditMode(true); setDraftMult(currentMult(cat)); setDraftNote("");
+  // Open the drawer straight into edit mode (from a card's Edit button).
+  const openEditDrawer = (id: string) => {
+    const f = factorById(id);
+    if (!f) return;
+    setDetailFactor(id); setEditMode(true); setCreatingFactor(false);
+    setFactorDraft(draftOfFactor(f));
+    setDraftMult(f.multiplier); setDraftNote("");
     setDetailDocsOpen(false); setDetailChatOpen(false);
   };
-  const startEdit = () => { if (detailFactor) { setDraftMult(currentMult(detailFactor)); setDraftNote(""); setEditMode(true); } };
-  const cancelEdit = () => setEditMode(false);
-  const saveFactorEdit = () => {
+  // The same drawer, in create mode.
+  const openCreateFactor = () => {
+    setDetailFactor(null); setCreatingFactor(true); setEditMode(true);
+    setFactorDraft(blankFactorDraft());
+    setDraftMult(0.5); setDraftNote("");
+  };
+  const startEdit = () => {
     if (!detailFactor) return;
-    const cat = detailFactor;
-    const from = currentMult(cat);
-    const ai = factorByCat(cat).aiMultiplier;
-    if (draftMult !== from) {
-      setFactorHistory((prev) => ({ ...prev, [cat]: [...(prev[cat] ?? []), { from, to: draftMult, note: draftNote.trim(), at: nowStamp() }] }));
-      setFactorMult((prev) => ({ ...prev, [cat]: draftMult }));
-      setModifiedAt((prev) => {
-        const next = { ...prev };
-        if (draftMult === ai) delete next[cat]; else next[cat] = nowStamp();
-        return next;
-      });
+    const f = factorById(detailFactor);
+    if (!f) return;
+    setFactorDraft(draftOfFactor(f));
+    setDraftMult(f.multiplier); setDraftNote(""); setEditMode(true);
+  };
+  const cancelEdit = () => { setEditMode(false); setCreatingFactor(false); };
+
+  // Save whatever moved. Name, description, severity, band and position are all
+  // one save, and the store records each change that actually happened.
+  const saveFactorEdit = () => {
+    if (!factorsStore) { setEditMode(false); return; }
+    const range = draftRange(factorDraft);
+    if (creatingFactor) {
+      const name = factorDraft.name.trim();
+      if (!name) return;
+      factorsStore.createFactor(
+        {
+          id: `factor-${Math.round(performance.now())}-${Math.random().toString(36).slice(2, 6)}`,
+          category: name,
+          rationale: factorDraft.description.trim(),
+          severity: factorDraft.severity,
+          // A factor the attorney adds carries no AI recommendation to restore
+          // to, so the AI position is recorded as the one they set.
+          aiMultiplier: draftMult, aiRange: range,
+          multiplier: draftMult, range,
+          confidence: 0,
+          docCount: 0,
+          drivers: [],
+          aiReasoning: factorDraft.description.trim() || `${name} was added by the attorney and has no AI analysis on file yet.`,
+          evidence: { strength: "Limited", primaryRecords: 0, expertOpinions: 0, witnessStatements: 0, medicalQuality: "Limited" },
+          defense: { argument: "No defense analysis is on file for this factor yet.", strength: "Moderate", rebuttal: "Add supporting evidence to develop a rebuttal." },
+          suggestion: { evidence: "Supporting documentation", why: "Evidence on file would let the AI assess this factor.", multiplierGain: 0 },
+        },
+        factorActor,
+        draftNote.trim() || undefined,
+      );
+      setCreatingFactor(false); setEditMode(false);
+      return;
     }
+    if (!detailFactor) return;
+    factorsStore.updateFactor(
+      detailFactor,
+      {
+        category: factorDraft.name.trim() || undefined,
+        rationale: factorDraft.description,
+        severity: factorDraft.severity,
+        multiplier: draftMult,
+        range,
+      },
+      factorActor,
+      draftNote.trim() || undefined,
+    );
     setEditMode(false);
   };
-  const restoreFactor = (cat: string) => {
-    const from = currentMult(cat);
-    const ai = factorByCat(cat).aiMultiplier;
-    if (from !== ai) setFactorHistory((prev) => ({ ...prev, [cat]: [...(prev[cat] ?? []), { from, to: ai, note: "Restored AI recommendation", at: nowStamp() }] }));
-    setFactorMult((prev) => ({ ...prev, [cat]: ai }));
-    setModifiedAt((prev) => { const next = { ...prev }; delete next[cat]; return next; });
-  };
+
+  const restoreFactor = (id: string) => factorsStore?.restoreFactor(id, factorActor);
   // Draft-aware live preview while editing in the drawer.
   const draftOverall = detailFactor ? overallMult - currentMult(detailFactor) + draftMult : overallMult;
   const draftSettlement = settlementForOverall(draftOverall);
@@ -2991,10 +3148,11 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
   // Lock background scroll while any right-side drawer is open, so the dimmed
   // backdrop always covers the full viewport regardless of scroll position.
   useEffect(() => {
-    const anyDrawerOpen = !!detailFactor || !!selectedPrecedent || !!drawerItem || !!deletingId || !!historyId;
+    const anyDrawerOpen = !!detailFactor || creatingFactor || !!selectedPrecedent || !!drawerItem
+      || !!deletingId || !!historyId || !!deletingFactorId || !!factorHistoryId;
     document.body.style.overflow = anyDrawerOpen ? "hidden" : "";
     return () => { document.body.style.overflow = ""; };
-  }, [detailFactor, selectedPrecedent, drawerItem, deletingId, historyId]);
+  }, [detailFactor, creatingFactor, selectedPrecedent, drawerItem, deletingId, historyId, deletingFactorId, factorHistoryId]);
   // Preview/Insights workspace for the drawer's documents (separate from the
   // Verified Damage Evidence workspace below).
   const [ecoWsView, setEcoWsView] = useState<"preview" | "insights" | null>(null);
@@ -3208,15 +3366,29 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
                 </div>
               )}
               <div className="divide-y divide-line">
-                {economicRows.map((e) => (
-                  <DamageRow
-                    key={e.item.id}
-                    row={e}
-                    open={ecoRowsOpen.has(e.label)}
-                    onToggle={() => toggleEcoRow(e.label)}
-                    onDetails={() => openDrawer(e)}
-                    {...rowActions(e.item)}
-                  />
+                {economicGroups.map((g) => (
+                  <div key={g.category} className={g.heading ? "py-1" : ""}>
+                    {/* A heading only where it adds something: a category
+                        holding one damage of the same name is just that row. */}
+                    {g.heading && (
+                      <div className="flex items-center justify-between gap-3 pt-2.5 pb-1">
+                        <span className="eyebrow">{g.category}</span>
+                        <span className="text-xs font-semibold text-ink tabular-nums">{formatUSD(g.subtotal)}</span>
+                      </div>
+                    )}
+                    <div className={g.heading ? "pl-3 border-l-2 border-line divide-y divide-line" : "divide-y divide-line"}>
+                      {g.rows.map((e) => (
+                        <DamageRow
+                          key={e.item.id}
+                          row={e}
+                          open={ecoRowsOpen.has(e.label)}
+                          onToggle={() => toggleEcoRow(e.label)}
+                          onDetails={() => openDrawer(e)}
+                          {...rowActions(e.item)}
+                        />
+                      ))}
+                    </div>
+                  </div>
                 ))}
                 {economicRows.length === 0 && (
                   <p className="secondary-text py-2.5">No economic damages are on file.</p>
@@ -3310,44 +3482,54 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
 
               {/* Damage Factors — interactive review & editing */}
               <div className="border border-line rounded-xl overflow-hidden">
-                <button
-                  onClick={() => setDamageFactorsOpen((v) => !v)}
-                  aria-expanded={damageFactorsOpen}
-                  className="w-full flex items-center justify-between gap-4 px-4 py-3 text-left hover:bg-wash transition-colors"
-                >
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="card-title">Damage Factors</span>
-                      <span className="text-xs font-semibold text-deep bg-tint border border-[#D6F2F7] rounded-full px-2 py-0.5 tabular-nums">
-                        {DA_DAMAGE_FACTORS.length}
-                      </span>
+                <div className="w-full flex items-center justify-between gap-4 px-4 py-3">
+                  <button
+                    onClick={() => setDamageFactorsOpen((v) => !v)}
+                    aria-expanded={damageFactorsOpen}
+                    className="flex-1 min-w-0 flex items-center justify-between gap-4 text-left"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="card-title">Damage Factors</span>
+                        <span className="text-xs font-semibold text-deep bg-tint border border-[#D6F2F7] rounded-full px-2 py-0.5 tabular-nums">
+                          {factors.length}
+                        </span>
+                      </div>
+                      <p className="secondary-text mt-0.5">
+                        Review and edit each factor contributing to the {fmtMult(overallMult)} multiplier.
+                      </p>
                     </div>
-                    <p className="secondary-text mt-0.5">
-                      Review and edit each factor contributing to the {fmtMult(overallMult)} multiplier.
-                    </p>
-                  </div>
-                  <ChevronDown
-                    className={`w-5 h-5 text-[#5B6B78] shrink-0 transition-transform duration-200 ${damageFactorsOpen ? "" : "-rotate-90"}`}
-                    strokeWidth={1.75}
-                  />
-                </button>
+                    <ChevronDown
+                      className={`w-5 h-5 text-[#5B6B78] shrink-0 transition-transform duration-200 ${damageFactorsOpen ? "" : "-rotate-90"}`}
+                      strokeWidth={1.75}
+                    />
+                  </button>
+                  {factorsStore && (
+                    <button
+                      onClick={() => { setDamageFactorsOpen(true); openCreateFactor(); }}
+                      className="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-line bg-white text-xs font-semibold text-deep hover:border-brand hover:bg-tint transition-colors"
+                    >
+                      <Plus className="w-3.5 h-3.5" strokeWidth={2} /> Add Damage Factor
+                    </button>
+                  )}
+                </div>
 
                 {damageFactorsOpen && (
                   <div className="border-t border-line bg-offwhite p-4 space-y-4">
-                    {DA_DAMAGE_FACTORS.map((f) => {
-                      const cur = currentMult(f.category);
-                      const [lo, hi] = SEVERITY_RANGE[f.severity];
-                      const overridden = hasOverride(f.category);
-                      const stamp = modifiedAt[f.category];
+                    {factors.map((f) => {
+                      const cur = f.multiplier;
+                      const [lo, hi] = f.range;
+                      const overridden = hasOverride(f.id);
+                      const stamp = overridden ? lastChangedAt(f.id) : undefined;
                       return (
-                        <div key={f.category} className="lg-card p-5 space-y-3">
+                        <div key={f.id} className="lg-card p-5 space-y-3">
                           {/* Header — title, severity, modified badge · multiplier + Edit */}
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <h4 className="card-title">{f.category}</h4>
                                 <span className={SEVERITY_PILL[f.severity]}>{f.severity}</span>
-                                {overridden && <span className="pill pill-progress"><Pencil className="w-3 h-3" strokeWidth={1.75} /> Attorney Modified</span>}
+                                <FactorProvenanceBadge provenance={f.provenance} />
                               </div>
                               <div className="flex items-center gap-2.5 mt-1 text-xs text-[#5B6B78] flex-wrap">
                                 <span>Range <span className="font-semibold text-ink tabular-nums">{fmtMult(lo)}–{fmtMult(hi)}</span></span>
@@ -3361,7 +3543,7 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
                                 <div className="text-base font-bold text-ink tabular-nums">{fmtMult(cur)}</div>
                                 <div className="text-[10px] uppercase tracking-wide text-[#8A98A3]">Multiplier</div>
                               </div>
-                              <button onClick={() => openEditDrawer(f.category)} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-line text-deep text-xs font-medium hover:bg-tint transition-colors">
+                              <button onClick={() => openEditDrawer(f.id)} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-line text-deep text-xs font-medium hover:bg-tint transition-colors">
                                 <Pencil className="w-3.5 h-3.5" strokeWidth={1.75} /> Edit
                               </button>
                             </div>
@@ -3372,8 +3554,8 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
                             <div className="flex-1 min-w-0 rounded-xl border border-line bg-offwhite p-3.5">
                               <p className="secondary-text leading-relaxed line-clamp-2">{f.aiReasoning}</p>
                             </div>
-                            <button onClick={() => openDetail(f.category)} className="shrink-0 inline-flex items-center gap-1.5 px-3.5 rounded-xl border border-line text-deep text-xs font-semibold hover:border-brand hover:bg-tint transition-colors">
-                              View Details <ArrowRight className="w-3.5 h-3.5" strokeWidth={1.75} />
+                            <button onClick={() => openDetail(f.id)} className="shrink-0 inline-flex items-center gap-1.5 px-3.5 rounded-xl border border-line text-deep text-xs font-semibold hover:border-brand hover:bg-tint transition-colors">
+                              <Sparkles className="w-3.5 h-3.5" strokeWidth={1.75} /> View reasoning
                             </button>
                           </div>
                         </div>
@@ -3395,32 +3577,33 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
                           <History className="w-3.5 h-3.5" strokeWidth={1.75} /> {historyOpen ? "Hide" : "View"} Edit History
                         </button>
                         {anyOverride && (
-                          <button onClick={() => DA_DAMAGE_FACTORS.forEach((f) => restoreFactor(f.category))} className="inline-flex items-center gap-1.5 text-xs font-semibold text-deep hover:text-ink transition-colors">
+                          <button onClick={() => factors.forEach((f) => restoreFactor(f.id))} className="inline-flex items-center gap-1.5 text-xs font-semibold text-deep hover:text-ink transition-colors">
                             <RotateCcw className="w-3.5 h-3.5" strokeWidth={1.75} /> Restore All AI
                           </button>
                         )}
                       </div>
                       {historyOpen && (
                         <div className="pt-1 space-y-2">
-                          {Object.entries(factorHistory).filter(([, h]) => h.length > 0).length === 0 ? (
-                            <p className="secondary-text">No attorney overrides yet — every factor is at its AI recommendation.</p>
+                          {(factorsStore?.audit.length ?? 0) === 0 ? (
+                            <p className="secondary-text">No changes yet — every factor is as the AI assessed it.</p>
                           ) : (
-                            Object.entries(factorHistory).filter(([, h]) => h.length > 0).map(([cat, h]) => (
-                              <div key={cat} className="rounded-lg border border-line bg-white p-3">
-                                <div className="text-xs font-semibold text-ink mb-1.5">{cat}</div>
-                                <div className="space-y-1">
-                                  {h.map((e, i) => (
-                                    <div key={i} className="flex items-center gap-2 text-xs text-[#5B6B78] flex-wrap">
-                                      <span className="tabular-nums">{fmtMult(e.from)}</span>
-                                      <ArrowRight className="w-3 h-3 shrink-0" strokeWidth={1.75} />
-                                      <span className="font-semibold text-ink tabular-nums">{fmtMult(e.to)}</span>
-                                      <span className="text-[#8A98A3]">· {e.at}</span>
-                                      {e.note && <span className="truncate">— {e.note}</span>}
+                            [...(factorsStore?.audit ?? [])].reverse().map((e) => (
+                              <div key={e.id} className="rounded-lg border border-line bg-white p-3">
+                                <div className="flex items-center gap-2 flex-wrap mb-1">
+                                  <span className="text-xs font-semibold text-ink">{e.factor}</span>
+                                  <span className="pill pill-neutral">{FACTOR_ACTION_LABEL[e.action]}</span>
+                                  <span className="mono-ref">{e.at}</span>
+                                </div>
+                                <div className="space-y-0.5 text-xs text-[#5B6B78]">
+                                  {(e.previous || e.next) && (
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      {e.previous && <span className="tabular-nums">{e.previous}</span>}
+                                      {e.previous && e.next && <ArrowRight className="w-3 h-3 shrink-0" strokeWidth={1.75} />}
+                                      {e.next && <span className="font-semibold text-ink tabular-nums">{e.next}</span>}
                                     </div>
-                                  ))}
-                                  <div className="flex items-center gap-2 text-xs text-[#8A98A3]">
-                                    <Sparkles className="w-3 h-3 shrink-0" strokeWidth={1.75} /> AI recommendation: <span className="tabular-nums">{fmtMult(factorByCat(cat).aiMultiplier)}</span>
-                                  </div>
+                                  )}
+                                  <div>Changed by {e.changedBy}</div>
+                                  {e.reason && <div className="italic">&ldquo;{e.reason}&rdquo;</div>}
                                 </div>
                               </div>
                             ))
@@ -3679,6 +3862,30 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
       onDownload={() => {}}
     />
 
+    {/* Removing a damage factor moves the multiplier, so it is confirmed with
+        the effect spelled out. */}
+    {deletingFactor && factorsStore && (
+      <DeleteFactorDialog
+        factor={deletingFactor}
+        impact={`The estimate would fall from ${formatUSD(recommendedSettlement)} to ${formatUSD(settlementForOverall(overallMult - deletingFactor.multiplier))}.`}
+        onCancel={() => setDeletingFactorId(null)}
+        onConfirm={() => {
+          factorsStore.deleteFactor(deletingFactor.id, factorActor, "Deleted by attorney on the Damages Analysis stage.");
+          setDeletingFactorId(null);
+          // The drawer was open on a factor that no longer exists.
+          setDetailFactor((id) => (id === deletingFactor.id ? null : id));
+          setEditMode(false);
+        }}
+      />
+    )}
+    {factorHistoryItem && factorsStore && (
+      <FactorHistoryDrawer
+        factor={factorHistoryItem}
+        entries={factorsStore.historyFor(factorHistoryItem.id)}
+        onClose={() => setFactorHistoryId(null)}
+      />
+    )}
+
     {/* Attorney damage editing — confirmation before a delete, and the change
         history for one damage. Both are dismissible and change nothing on open. */}
     {deleting && damages && (
@@ -3892,34 +4099,44 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
       </>
     )}
 
-    {/* ── Damage-factor "View Details" drawer (with inline edit) ── */}
-    {detailFactor && (() => {
-      const f = factorByCat(detailFactor);
-      const cur = currentMult(detailFactor);
-      const [lo, hi] = SEVERITY_RANGE[f.severity];
-      const overridden = hasOverride(detailFactor);
-      const prevForFactor = settlementForOverall(overallMult - cur + f.aiMultiplier);
+    {/* ── Damage-factor drawer — reasoning in read mode, the full factor in
+           edit mode, and the same form again for a new factor. ── */}
+    {(detailFactor || creatingFactor) && (() => {
+      const existing = detailFactor ? factorById(detailFactor) : undefined;
+      // In create mode there is no factor yet; the form drives everything.
+      const f = existing ?? factors[0];
+      if (!f) return null;
+      const cur = existing ? existing.multiplier : draftMult;
+      const [lo, hi] = creatingFactor ? draftRange(factorDraft) : f.range;
+      const overridden = !!existing && hasOverride(existing.id);
+      const prevForFactor = existing ? settlementForOverall(overallMult - cur + existing.aiMultiplier) : recommendedSettlement;
       const diff = recommendedSettlement - prevForFactor;
       const gainSettlement = Math.round(economicTotal * f.suggestion.multiplierGain);
-      const docNames = padDocsToCount([], detailFactor, f.docCount);
-      const stamp = modifiedAt[detailFactor];
+      const docNames = padDocsToCount([], f.category, f.docCount);
+      const stamp = existing && overridden ? lastChangedAt(existing.id) : undefined;
       const presets = Array.from(new Set([lo, Math.round(((lo + hi) / 2) * 100) / 100, hi]));
-      const draftDiff = draftSettlement - recommendedSettlement;
+      // While creating, the preview adds the new factor rather than replacing one.
+      const draftOverall2 = creatingFactor ? overallMult + draftMult : draftOverall;
+      const draftDiff = settlementForOverall(draftOverall2) - recommendedSettlement;
+      const closeDrawer = () => { setDetailFactor(null); setCreatingFactor(false); setEditMode(false); };
       const dim = editMode ? "opacity-50 pointer-events-none select-none" : "";
       return (
         <>
-          <div className="fixed inset-0 bg-ink/40 z-50" onClick={() => setDetailFactor(null)} />
+          <div className="fixed inset-0 bg-ink/40 z-50" onClick={closeDrawer} />
           <div className="fixed top-0 right-0 h-full w-[460px] max-w-[92vw] bg-white shadow-xl z-50 flex flex-col">
             {/* Header */}
             <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-line">
               <div className="min-w-0">
-                <div className="eyebrow mb-1">Damage Factor</div>
+                <div className="eyebrow mb-1">{creatingFactor ? "Add Damage Factor" : "Damage Factor"}</div>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <h2 className="card-title">{f.category}</h2>
-                  <span className={SEVERITY_PILL[f.severity]}>{f.severity}</span>
+                  <h2 className="card-title">{creatingFactor ? (factorDraft.name.trim() || "New factor") : f.category}</h2>
+                  <span className={SEVERITY_PILL[creatingFactor ? factorDraft.severity : f.severity]}>
+                    {creatingFactor ? factorDraft.severity : f.severity}
+                  </span>
+                  {!creatingFactor && <FactorProvenanceBadge provenance={f.provenance} />}
                 </div>
               </div>
-              <button onClick={() => setDetailFactor(null)} className="p-1.5 hover:bg-tint rounded-lg transition-colors shrink-0"><X className="w-5 h-5 text-[#5B6B78]" strokeWidth={1.75} /></button>
+              <button onClick={closeDrawer} className="p-1.5 hover:bg-tint rounded-lg transition-colors shrink-0"><X className="w-5 h-5 text-[#5B6B78]" strokeWidth={1.75} /></button>
             </div>
 
             {detailChatOpen ? (
@@ -3953,12 +4170,78 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
                       )}
                     </div>
                   ) : (
+                    <div className="space-y-3.5">
+                    {/* The factor itself — name, what it covers, how severe */}
+                    <div className="rounded-xl border border-line bg-white p-3.5 space-y-3">
+                      <div className="eyebrow">Factor Details</div>
+                      <div>
+                        <label className="eyebrow block mb-1">Factor Name</label>
+                        <input
+                          value={factorDraft.name}
+                          onChange={(e) => setFactorDraft({ ...factorDraft, name: e.target.value })}
+                          placeholder="Enter factor name"
+                          className="w-full px-3 py-2 rounded-lg border border-line text-sm text-ink focus:outline-none focus:border-brand transition-colors"
+                        />
+                      </div>
+                      <div>
+                        <label className="eyebrow block mb-1">Description</label>
+                        <textarea
+                          value={factorDraft.description}
+                          onChange={(e) => setFactorDraft({ ...factorDraft, description: e.target.value })}
+                          rows={3}
+                          placeholder="Describe how this factor affects the case..."
+                          className="w-full px-3 py-2 rounded-lg border border-line text-sm text-ink focus:outline-none focus:border-brand transition-colors resize-y"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="eyebrow block mb-1">Severity</label>
+                          <select
+                            value={factorDraft.severity}
+                            onChange={(e) => {
+                              const severity = e.target.value as Severity;
+                              const [sLo, sHi] = SEVERITY_RANGE[severity];
+                              // Changing severity offers that band; the attorney
+                              // can still set their own below.
+                              setFactorDraft({ ...factorDraft, severity, rangeLow: String(sLo), rangeHigh: String(sHi) });
+                            }}
+                            className="w-full px-3 py-2 rounded-lg border border-line text-sm text-ink focus:outline-none focus:border-brand transition-colors"
+                          >
+                            {(Object.keys(SEVERITY_RANGE) as Severity[]).map((sev) => (
+                              <option key={sev} value={sev}>{sev}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="eyebrow block mb-1">Multiplier Range</label>
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="number" step="0.05" min="0" value={factorDraft.rangeLow}
+                              onChange={(e) => setFactorDraft({ ...factorDraft, rangeLow: e.target.value })}
+                              className="w-full px-2 py-2 rounded-lg border border-line text-sm text-ink tabular-nums focus:outline-none focus:border-brand transition-colors"
+                            />
+                            <span className="text-xs text-[#8A98A3] shrink-0">–</span>
+                            <input
+                              type="number" step="0.05" min="0" value={factorDraft.rangeHigh}
+                              onChange={(e) => setFactorDraft({ ...factorDraft, rangeHigh: e.target.value })}
+                              className="w-full px-2 py-2 rounded-lg border border-line text-sm text-ink tabular-nums focus:outline-none focus:border-brand transition-colors"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
                     <div className="rounded-xl border border-brand bg-tint p-3.5 space-y-3.5">
                       <div className="flex items-center justify-between gap-3">
-                        <div className="eyebrow">Edit Multiplier</div>
-                        <button onClick={() => restoreFactor(detailFactor)} className="inline-flex items-center gap-1.5 text-xs font-semibold text-deep hover:text-ink transition-colors">
-                          <RotateCcw className="w-3.5 h-3.5" strokeWidth={1.75} /> Restore AI
-                        </button>
+                        <div className="eyebrow">{creatingFactor ? "Recommended Multiplier" : "Edit Multiplier"}</div>
+                        {!creatingFactor && detailFactor && (
+                          <button onClick={() => restoreFactor(detailFactor)} className="inline-flex items-center gap-1.5 text-xs font-semibold text-deep hover:text-ink transition-colors">
+                            <RotateCcw className="w-3.5 h-3.5" strokeWidth={1.75} /> Restore AI
+                          </button>
+                        )}
+                      </div>
+                      <div className="text-xs text-[#5B6B78]">
+                        Recommended range <span className="font-semibold text-ink tabular-nums">{fmtMult(lo)}–{fmtMult(hi)}</span>
                       </div>
                       <div className="flex items-center gap-2">
                         {presets.map((p) => (
@@ -3996,20 +4279,59 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
                       </div>
                       <div className="flex items-center gap-2">
                         <button onClick={cancelEdit} className="btn btn-secondary flex-1 justify-center">Cancel</button>
-                        <button onClick={saveFactorEdit} className="btn btn-primary flex-1 justify-center">Save Changes</button>
+                        <button
+                          onClick={saveFactorEdit}
+                          disabled={creatingFactor && factorDraft.name.trim().length === 0}
+                          className="btn btn-primary flex-1 justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {creatingFactor ? "Add Damage Factor" : "Save Changes"}
+                        </button>
                       </div>
+                    </div>
+
+                    {/* Deleting changes the valuation, so it sits apart from
+                        Save and is always confirmed. */}
+                    {!creatingFactor && existing && (
+                      <div className="rounded-xl border border-[#F5C9C4] bg-[#FEF4F3] p-3.5 flex items-center justify-between gap-3 flex-wrap">
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold text-ink">Delete Damage Factor</div>
+                          <p className="text-xs text-[#5B6B78] mt-0.5">Removes it from the recommended multiplier.</p>
+                        </div>
+                        <button
+                          onClick={() => setDeletingFactorId(existing.id)}
+                          className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#F5C9C4] bg-white text-sm font-semibold text-[#B42318] hover:bg-[#FDEBE9] transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} /> Delete Factor
+                        </button>
+                      </div>
+                    )}
+
+                    {/* This factor's own change history. */}
+                    {!creatingFactor && existing && (
+                      <button
+                        onClick={() => setFactorHistoryId(existing.id)}
+                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-deep hover:text-ink transition-colors"
+                      >
+                        <History className="w-3.5 h-3.5" strokeWidth={1.75} /> View this factor's history
+                      </button>
+                    )}
                     </div>
                   )}
 
                   <div className={`space-y-5 transition-opacity ${dim}`}>
-                    <div className="rounded-xl border border-line overflow-hidden">
-                      <div className="flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-semibold text-ink border-b border-line bg-tint">
-                        <Sparkles className="w-3.5 h-3.5 text-deep" strokeWidth={1.75} /> AI Summary
-                      </div>
-                      <div className="px-3.5 py-3 bg-tint">
-                        <p className="secondary-text leading-relaxed">{f.aiReasoning}</p>
-                      </div>
-                    </div>
+                    {/* Why this band — the case, the comparables, and the
+                        money the two produce. Read-only: understanding a factor
+                        and changing one are different things. */}
+                    {existing && (
+                      <FactorReasoning
+                        factor={existing}
+                        precedents={COMPARABLE_VERDICTS}
+                        economicTotal={economicTotal}
+                        caseType={model.caseType}
+                        jurisdiction={model.jurisdiction}
+                        matchedByCorridor={CORRIDOR_RESULT.matchedCases}
+                      />
+                    )}
 
                     <div className="rounded-xl border border-line overflow-hidden">
                       <div className="flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-semibold text-ink border-b border-line bg-offwhite">

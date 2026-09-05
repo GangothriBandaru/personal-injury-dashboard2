@@ -17,6 +17,23 @@ export const BUCKET_LABEL: Record<DamageBucket, string> = {
   noneconomic: "Non-Economic Damages",
 };
 
+// The categories economic damages are filed under. These are the six the stage
+// has always shown; a damage belongs to one of them, and several damages can
+// share one. The bucket above stays the top-level economic/non-economic split.
+export const ECONOMIC_CATEGORIES = [
+  "Medical Expenses",
+  "Lost Wages",
+  "Future Medical Care",
+  "Physical Therapy",
+  "Transportation",
+  "Other Expenses",
+] as const;
+
+export type EconomicCategory = (typeof ECONOMIC_CATEGORIES)[number];
+
+export const isEconomicCategory = (s: string): s is EconomicCategory =>
+  (ECONOMIC_CATEGORIES as readonly string[]).includes(s);
+
 // How a record came to hold its current values. Deliberately separate from
 // `verified`, which describes the evidence rather than the authorship — an
 // AI-modified damage can still be a verified one.
@@ -39,6 +56,9 @@ export interface DamageItem {
   amount: number;
   description: string;        // one-line summary shown under the label
   category: string;           // damage type — "Medical Bills", "Lost Wages" …
+  /** Which economic category this damage is filed under. Only meaningful in the
+   *  economic bucket; a non-economic damage carries its last one harmlessly. */
+  group: EconomicCategory;
   reasoning: string;          // supporting information behind the figure
   notes?: string;             // attorney/assistant notes, added on demand
   docs: string[];             // supporting evidence
@@ -52,7 +72,7 @@ export interface DamageItem {
 
 // The fields the assistant is allowed to change, named as the attorney would
 // name them. Anything not on this list is not editable through chat.
-export type DamageField = "amount" | "description" | "category" | "reasoning" | "notes" | "docs";
+export type DamageField = "amount" | "description" | "category" | "reasoning" | "notes" | "docs" | "group";
 
 export const DAMAGE_FIELD_LABEL: Record<DamageField, string> = {
   amount: "Amount",
@@ -61,6 +81,7 @@ export const DAMAGE_FIELD_LABEL: Record<DamageField, string> = {
   reasoning: "Supporting Information",
   notes: "Notes",
   docs: "Supporting Evidence",
+  group: "Bucket",
 };
 
 export type DamageAction = "created" | "edited" | "moved" | "deleted";
@@ -129,7 +150,7 @@ export type NewDamage = Omit<DamageItem, "provenance" | "addedBy" | "addedAt">;
 
 export const DAMAGE_SEED: DamageItem[] = [
   {
-    id: "medical-expenses", label: "Medical Expenses", bucket: "economic", amount: 87500,
+    id: "medical-expenses", label: "Medical Expenses", bucket: "economic", group: "Medical Expenses", amount: 87500,
     description: "Emergency, hospital, imaging & physician bills",
     category: "Medical Bills",
     reasoning: "Every charge traces to an itemized billing document and reconciles to the verified total with no duplicates.",
@@ -137,7 +158,7 @@ export const DAMAGE_SEED: DamageItem[] = [
     docCount: 18, iconKey: "stethoscope", provenance: "system", verified: true,
   },
   {
-    id: "lost-wages", label: "Lost Wages", bucket: "economic", amount: 43200,
+    id: "lost-wages", label: "Lost Wages", bucket: "economic", group: "Lost Wages", amount: 43200,
     description: "Documented income loss during treatment",
     category: "Lost Wages",
     reasoning: "Verified against employer payroll records and the plaintiff's pre-incident earnings history.",
@@ -145,7 +166,7 @@ export const DAMAGE_SEED: DamageItem[] = [
     docCount: 6, iconKey: "dollar", provenance: "system", verified: true,
   },
   {
-    id: "future-medical-care", label: "Future Medical Care", bucket: "economic", amount: 18750,
+    id: "future-medical-care", label: "Future Medical Care", bucket: "economic", group: "Future Medical Care", amount: 18750,
     description: "Projected ongoing medical management",
     category: "Future Medical Care",
     reasoning: "Projected from the life-care plan and corroborating treating-physician cost estimates.",
@@ -153,7 +174,7 @@ export const DAMAGE_SEED: DamageItem[] = [
     docCount: 9, iconKey: "heart", provenance: "system", verified: true,
   },
   {
-    id: "physical-therapy", label: "Physical Therapy", bucket: "economic", amount: 6000,
+    id: "physical-therapy", label: "Physical Therapy", bucket: "economic", group: "Physical Therapy", amount: 6000,
     description: "Physical therapy & rehabilitation program",
     category: "Rehabilitation",
     reasoning: "Substantiated by the documented physical-therapy treatment record and invoices.",
@@ -161,7 +182,7 @@ export const DAMAGE_SEED: DamageItem[] = [
     docCount: 12, iconKey: "activity", provenance: "system", verified: true,
   },
   {
-    id: "transportation", label: "Transportation", bucket: "economic", amount: 3850,
+    id: "transportation", label: "Transportation", bucket: "economic", group: "Transportation", amount: 3850,
     description: "Mileage & medical travel costs",
     category: "Transportation",
     reasoning: "Mileage and medical-travel expenses tied to documented appointments at the standard reimbursement rate.",
@@ -169,7 +190,7 @@ export const DAMAGE_SEED: DamageItem[] = [
     docCount: 5, iconKey: "pin", provenance: "system", verified: true,
   },
   {
-    id: "other-expenses", label: "Other Expenses", bucket: "economic", amount: 2150,
+    id: "other-expenses", label: "Other Expenses", bucket: "economic", group: "Other Expenses", amount: 2150,
     description: "Assistive devices & out-of-pocket costs",
     category: "Other Damages",
     reasoning: "Assistive devices and out-of-pocket costs, each backed by an itemized receipt.",

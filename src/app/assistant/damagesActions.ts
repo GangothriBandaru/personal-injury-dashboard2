@@ -251,6 +251,7 @@ const fieldValue = (item: DamageItem, field: DamageField): string => {
     case "reasoning": return item.reasoning;
     case "notes": return item.notes ?? "—";
     case "docs": return item.docs.join(", ");
+    case "group": return item.group;
   }
 };
 
