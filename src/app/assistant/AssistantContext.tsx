@@ -1,9 +1,9 @@
-import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from "react";
+import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from "react";
 import type { AnalysisFinding, CaseDocument } from "../types/case";
-import type { ContextSel, AssistantAnswer } from "./assistantEngine";
+import type { AssistantAnswer, ContextSel } from "./assistantEngine";
 import type { ChronCandidate, ChronEdit } from "./chronologyActions";
 import type {
-  DamageAddProposal, DamageDeleteProposal, DamageEditProposal, DamageMoveProposal, DamageSuggestion,
+    DamageAddProposal, DamageDeleteProposal, DamageEditProposal, DamageMoveProposal, DamageSuggestion,
 } from "./damagesActions";
 
 // ── Assistant store ───────────────────────────────────────────────────────────
@@ -72,6 +72,7 @@ export interface Conversation {
   title: string;
   contextLabel: string;
   createdAt: string;
+  pinned?: boolean;
   messages: Message[];
 }
 
@@ -121,6 +122,7 @@ const blank = (contextLabel: string): Conversation => ({
   title: "New Chat",
   contextLabel,
   createdAt: stamp(),
+  pinned: false,
   messages: [],
 });
 

@@ -1,38 +1,83 @@
-import { useEffect, useRef, useState } from "react";
 import {
-  Sparkles, X, Send, ChevronDown, ChevronRight, Maximize2, Minimize2, Plus,
-  MessageSquare, FileText, Info, History, Check, Layers,
+    Check,
+    ChevronDown, ChevronRight,
+    FileText,
+    History,
+    Info,
+    Layers,
+    Maximize2,
+    MessageSquare,
+    Minimize2,
+    MoreVertical,
+    PanelLeftClose, PanelLeftOpen,
+    Pencil,
+    Pin,
+    Plus,
+    Search,
+    Send,
+    Sparkles,
+    Trash2,
+    X,
 } from "lucide-react";
-import {
-  useAssistant, DRAWER_MIN, DRAWER_DEFAULT, drawerMax, expandThreshold,
-  type Message, type WorkStage, type DamageState,
-} from "./AssistantContext";
-import {
-  contextLabel, answer, contextChangeNotice, workStageLabel, effectiveScope, pinnedStage,
-  documentsForStage, globalSource, STAGE_TREE, GLOBAL_SOURCES,
-  type ContextSel, type AssistantAnswer, type WorkStageDef,
-} from "./assistantEngine";
-import { DOC_ACTIONS, documentAction, proposalFor, suggestionsForWork, type DocActionId } from "./documentActions";
-import { ProposedEvent, ProposedEdit } from "./ChronologyProposal";
-import {
-  detectIntent, missingCandidates, findEdit, toAddition, parseRequestedEvent,
-  type ChronCandidate, type ChronEdit,
-} from "./chronologyActions";
+import { useEffect, useRef, useState } from "react";
 import { useChronologyOptional, versionStamp, type ChronVersion } from "../chronology/ChronologyContext";
 import {
-  useDamagesOptional, aiActor, formatDamageUSD, isEconomicCategory, DAMAGE_FIELD_LABEL,
-  type DamageItem, type FieldChange,
+    aiActor,
+    DAMAGE_FIELD_LABEL,
+    formatDamageUSD, isEconomicCategory,
+    useDamagesOptional,
+    type DamageItem, type FieldChange,
 } from "../damages/DamagesContext";
-import {
-  detectDamageIntent, buildEditProposal, buildAddProposal, buildDeleteProposal, buildMoveProposal,
-  findDamage, namesDamage, missingDamages, figureFromDocuments, proposalFromSuggestion,
-  type DamageAddProposal, type DamageDeleteProposal, type DamageEditProposal,
-  type DamageMoveProposal, type DamageSuggestion,
-} from "./damagesActions";
-import {
-  ProposedDamageAdd, ProposedDamageDelete, ProposedDamageEdit, ProposedDamageMove, SuggestedDamage,
-} from "./DamageProposal";
 import { CHRONOLOGY_TITLES, CURRENT_USER as CURRENT_ATTORNEY, documentAmount } from "../workspace/WorkspaceTabs";
+import {
+    DRAWER_DEFAULT,
+    DRAWER_MIN,
+    drawerMax, expandThreshold,
+    useAssistant,
+    type Conversation,
+    type DamageState,
+    type Message, type WorkStage,
+} from "./AssistantContext";
+import { ProposedEdit, ProposedEvent } from "./ChronologyProposal";
+import {
+    ProposedDamageAdd, ProposedDamageDelete, ProposedDamageEdit, ProposedDamageMove, SuggestedDamage,
+} from "./DamageProposal";
+import {
+    answer, contextChangeNotice,
+    contextLabel,
+    documentsForStage,
+    effectiveScope,
+    GLOBAL_SOURCES,
+    globalSource,
+    pinnedStage,
+    STAGE_TREE,
+    workStageLabel,
+    type AssistantAnswer,
+    type ContextSel,
+    type WorkStageDef,
+} from "./assistantEngine";
+import {
+    detectIntent,
+    findEdit,
+    missingCandidates,
+    parseRequestedEvent,
+    toAddition,
+    type ChronCandidate, type ChronEdit,
+} from "./chronologyActions";
+import {
+    buildAddProposal, buildDeleteProposal,
+    buildEditProposal,
+    buildMoveProposal,
+    detectDamageIntent,
+    figureFromDocuments,
+    findDamage,
+    missingDamages,
+    namesDamage,
+    proposalFromSuggestion,
+    type DamageAddProposal, type DamageDeleteProposal, type DamageEditProposal,
+    type DamageMoveProposal, type DamageSuggestion,
+} from "./damagesActions";
+import { DOC_ACTIONS, documentAction, proposalFor, suggestionsForWork, type DocActionId } from "./documentActions";
 
 // ── AI Assistant ──────────────────────────────────────────────────────────────
 // The launcher sits in the top bar; the panel is part of the shell layout, so
@@ -689,6 +734,181 @@ function Composer({ onSend, disabled }: { onSend: (t: string) => void; disabled:
   );
 }
 
+function ChatTitle({ title }: { title: string }) {
+  const wrapperRef = useRef<HTMLSpanElement>(null);
+  const titleRef = useRef<HTMLSpanElement>(null);
+  const [overflowing, setOverflowing] = useState(false);
+  const [offset, setOffset] = useState(0);
+  const [hovered, setHovered] = useState(false);
+
+  const measure = () => {
+    const wrapper = wrapperRef.current;
+    const node = titleRef.current;
+    if (!wrapper || !node) return;
+    const nextOffset = wrapper.clientWidth - node.scrollWidth;
+    setOverflowing(nextOffset < 0);
+    setOffset(Math.min(0, nextOffset));
+  };
+
+  return (
+    <span
+      ref={wrapperRef}
+      className="min-w-0 flex-1 overflow-hidden whitespace-nowrap"
+      title={title}
+      onMouseEnter={() => { measure(); setHovered(true); }}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <span
+        ref={titleRef}
+        className="inline-block whitespace-nowrap align-bottom transition-transform duration-500 ease-out"
+        style={{ transform: hovered && overflowing ? `translateX(${offset}px)` : "translateX(0)" }}
+      >
+        {title}
+      </span>
+    </span>
+  );
+}
+
+function AssistantHistory({
+  conversations, activeId, collapsed, onToggleCollapsed, onSelect, onNewChat,
+  onTogglePin, onRename, onDelete,
+}: {
+  conversations: Conversation[];
+  activeId: string;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
+  onSelect: (id: string) => void;
+  onNewChat: () => void;
+  onTogglePin: (id: string) => void;
+  onRename: (id: string, title: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [menuId, setMenuId] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+
+  const visible = conversations.filter((conversation) =>
+    !query.trim() || conversation.title.toLowerCase().includes(query.trim().toLowerCase()),
+  );
+  const pinned = visible.filter((conversation) => conversation.pinned);
+  const recents = visible.filter((conversation) => !conversation.pinned);
+
+  const beginRename = (conversation: Conversation) => {
+    setRenamingId(conversation.id);
+    setRenameValue(conversation.title);
+    setMenuId(null);
+  };
+
+  const saveRename = (id: string) => {
+    const title = renameValue.trim();
+    if (title) onRename(id, title);
+    setRenamingId(null);
+  };
+
+  const renderChat = (conversation: Conversation) => (
+    <div key={conversation.id} className="group relative">
+      {renamingId === conversation.id ? (
+        <form
+          onSubmit={(event) => { event.preventDefault(); saveRename(conversation.id); }}
+          className="flex items-center gap-1 rounded-lg bg-white px-2 py-1.5 border border-brand"
+        >
+          <input
+            autoFocus
+            value={renameValue}
+            onChange={(event) => setRenameValue(event.target.value)}
+            onBlur={() => saveRename(conversation.id)}
+            className="min-w-0 flex-1 bg-transparent text-sm text-ink focus:outline-none"
+          />
+          <button type="submit" className="text-deep hover:text-ink" title="Save name">
+            <Check className="h-3.5 w-3.5" strokeWidth={2} />
+          </button>
+        </form>
+      ) : (
+        <button
+          onClick={() => onSelect(conversation.id)}
+          className={`w-full flex items-center gap-2 rounded-lg px-2.5 py-2.5 pr-8 text-left transition-colors ${
+            conversation.id === activeId ? "bg-tint text-deep" : "text-ink hover:bg-wash"
+          }`}
+        >
+          <MessageSquare className="h-3.5 w-3.5 shrink-0 text-deep" strokeWidth={1.75} />
+          <ChatTitle title={conversation.title} />
+          {conversation.pinned && <Pin className="h-3 w-3 shrink-0 text-deep" fill="currentColor" strokeWidth={1.75} />}
+        </button>
+      )}
+      {!collapsed && renamingId !== conversation.id && (
+        <button
+          onClick={(event) => { event.stopPropagation(); setMenuId((current) => current === conversation.id ? null : conversation.id); }}
+          title="Chat actions"
+          className={`absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-[#8A98A3] opacity-0 transition-opacity hover:bg-white hover:text-ink group-hover:opacity-100 ${menuId === conversation.id ? "opacity-100 bg-white" : ""}`}
+        >
+          <MoreVertical className="h-4 w-4" strokeWidth={1.75} />
+        </button>
+      )}
+      {menuId === conversation.id && (
+        <div className="absolute right-1 top-10 z-30 w-32 rounded-lg border border-line bg-white p-1 shadow-lg">
+          <button onClick={() => beginRename(conversation)} className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs text-ink hover:bg-wash">
+            <Pencil className="h-3.5 w-3.5 text-deep" strokeWidth={1.75} /> Rename
+          </button>
+          <button onClick={() => { onTogglePin(conversation.id); setMenuId(null); }} className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs text-ink hover:bg-wash">
+            <Pin className="h-3.5 w-3.5 text-deep" strokeWidth={1.75} /> {conversation.pinned ? "Unpin" : "Pin"}
+          </button>
+          <button onClick={() => { onDelete(conversation.id); setMenuId(null); }} className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs text-red-700 hover:bg-red-50">
+            <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} /> Delete
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
+  if (collapsed) {
+    return (
+      <div className="flex h-full w-[56px] shrink-0 flex-col items-center border-r border-line bg-offwhite py-3">
+        <button onClick={onToggleCollapsed} title="Expand chat sidebar" className="rounded-lg p-2 text-[#5B6B78] hover:bg-tint hover:text-ink">
+          <PanelLeftOpen className="h-4 w-4" strokeWidth={1.75} />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full w-[248px] shrink-0 flex-col border-r border-line bg-offwhite">
+      <div className="space-y-2 border-b border-line p-3">
+        <div className="flex items-center gap-1.5">
+          <button onClick={onNewChat} className="flex min-w-0 flex-1 items-center gap-2 rounded-lg bg-ink px-3 py-2 text-left text-sm font-medium text-white transition-colors hover:bg-deep">
+            <Plus className="h-4 w-4 shrink-0" strokeWidth={1.9} /> New Chat
+          </button>
+          <button onClick={() => setSearchOpen((open) => !open)} title="Search chats" className={`rounded-lg p-2 transition-colors ${searchOpen ? "bg-tint text-deep" : "text-[#5B6B78] hover:bg-tint hover:text-ink"}`}>
+            <Search className="h-4 w-4" strokeWidth={1.75} />
+          </button>
+          <button onClick={onToggleCollapsed} title="Collapse chat sidebar" className="rounded-lg p-2 text-[#5B6B78] hover:bg-tint hover:text-ink">
+            <PanelLeftClose className="h-4 w-4" strokeWidth={1.75} />
+          </button>
+        </div>
+        {searchOpen && (
+          <div className="flex items-center gap-2 rounded-lg border border-line bg-white px-2.5 py-2">
+            <Search className="h-3.5 w-3.5 shrink-0 text-[#8A98A3]" strokeWidth={1.75} />
+            <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search chats" className="min-w-0 flex-1 bg-transparent text-xs text-ink placeholder:text-[#9BA8B4] focus:outline-none" />
+          </div>
+        )}
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
+        {pinned.length > 0 && (
+          <section className="mb-5">
+            <div className="eyebrow px-2 mb-2">Pinned</div>
+            <div className="space-y-1">{pinned.map(renderChat)}</div>
+          </section>
+        )}
+        <section>
+          <div className="eyebrow px-2 mb-2">Recents</div>
+          {recents.length > 0 ? <div className="space-y-1">{recents.map(renderChat)}</div> : <p className="px-2 text-xs text-[#8A98A3]">No chats found.</p>}
+        </section>
+      </div>
+    </div>
+  );
+}
+
 // ── Panel ─────────────────────────────────────────────────────────────────────
 
 export function AssistantPanel() {
@@ -702,6 +922,7 @@ export function AssistantPanel() {
   const damages = useDamagesOptional();
   const [thinking, setThinking] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [docsOpen, setDocsOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
@@ -1323,33 +1544,65 @@ export function AssistantPanel() {
   const toggleDoc = (n: string) =>
     setSelectedDocs(selectedDocs.includes(n) ? selectedDocs.filter((x) => x !== n) : [...selectedDocs, n]);
 
+  const togglePinned = (id: string) =>
+    setConversations((prev) => prev.map((conversation) =>
+      conversation.id === id ? { ...conversation, pinned: !conversation.pinned } : conversation,
+    ));
+
+  const renameConversation = (id: string, title: string) =>
+    setConversations((prev) => prev.map((conversation) =>
+      conversation.id === id ? { ...conversation, title } : conversation,
+    ));
+
+  const deleteConversation = (id: string) => {
+    setConversations((prev) => {
+      const remaining = prev.filter((conversation) => conversation.id !== id);
+      if (remaining.length > 0) {
+        if (id === active.id) setActiveId(remaining[0].id);
+        return remaining;
+      }
+      const replacement: Conversation = {
+        id: `c-${Math.round(performance.now())}-${Math.random().toString(36).slice(2, 7)}`,
+        title: "New Chat",
+        contextLabel: ctxLabel,
+        createdAt: new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }),
+        pinned: false,
+        messages: [],
+      };
+      setActiveId(replacement.id);
+      return [replacement];
+    });
+  };
+
   const empty = !active || active.messages.length === 0;
 
-  const header = (
-    <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-line shrink-0">
-      <div className="flex items-center gap-2 min-w-0">
-        <Sparkles className="w-4 h-4 text-deep shrink-0" strokeWidth={1.75} />
-        <h2 className="card-title truncate">AI Assistant</h2>
+  const conversationHeader = (
+    <div className="flex items-center justify-between gap-3 bg-ink px-5 py-4 text-white shrink-0">
+      <div className="flex min-w-0 items-center gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand text-ink">
+          <Sparkles className="h-4 w-4" strokeWidth={1.9} />
+        </div>
+        <div className="min-w-0">
+          <h2 className="truncate text-base font-semibold text-white">AI Assistant</h2>
+          <p className="truncate text-xs text-white/70">{ctxLabel}</p>
+        </div>
       </div>
       <div className="flex items-center gap-1 shrink-0">
         {!expanded && (
-          <button
-            onClick={() => setShowHistory((h) => !h)}
-            title="Chat history"
-            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              showHistory ? "bg-tint text-deep" : "text-[#5B6B78] hover:bg-tint hover:text-ink"
-            }`}
-          >
-            <History className="w-3.5 h-3.5" strokeWidth={1.75} /> History
+          <button onClick={() => setShowHistory((history) => !history)} title="Chat history" className="rounded-lg p-2 text-white/75 hover:bg-white/10 hover:text-white">
+            <History className="h-4 w-4" strokeWidth={1.75} />
           </button>
         )}
-        <button onClick={() => setExpanded(!expanded)} title={expanded ? "Collapse" : "Expand"} className="p-1.5 hover:bg-tint rounded-lg transition-colors">
-          {expanded
-            ? <Minimize2 className="w-4 h-4 text-[#5B6B78]" strokeWidth={1.75} />
-            : <Maximize2 className="w-4 h-4 text-[#5B6B78]" strokeWidth={1.75} />}
+        {expanded && (
+          <button onClick={() => setSidebarCollapsed((collapsed) => !collapsed)} title={sidebarCollapsed ? "Show chat sidebar" : "Hide chat sidebar"} className="rounded-lg p-2 text-white/75 hover:bg-white/10 hover:text-white">
+            {sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" strokeWidth={1.75} /> : <PanelLeftClose className="h-4 w-4" strokeWidth={1.75} />}
+          </button>
+        )}
+        <button onClick={() => setExpanded(!expanded)} title={expanded ? "Collapse" : "Expand"} className="rounded-lg p-2 text-white/75 hover:bg-white/10 hover:text-white">
+          {expanded ? <Minimize2 className="h-4 w-4" strokeWidth={1.75} /> : <Maximize2 className="h-4 w-4" strokeWidth={1.75} />}
         </button>
-        <button onClick={() => { setOpen(false); setExpanded(false); }} title="Close" className="p-1.5 hover:bg-tint rounded-lg transition-colors">
-          <X className="w-4.5 h-4.5 text-[#5B6B78]" strokeWidth={1.75} />
+        <button onClick={() => { setOpen(false); setExpanded(false); }} title="Close" className="rounded-lg p-2 text-white/75 hover:bg-white/10 hover:text-white">
+          <X className="h-4 w-4" strokeWidth={1.75} />
         </button>
       </div>
     </div>
@@ -1398,32 +1651,6 @@ export function AssistantPanel() {
     </div>
   );
 
-  // Drawer-only history view. Titles only, no state descriptions.
-  const historyPanel = (
-    <div className="flex-1 overflow-y-auto p-4 space-y-3 min-h-0">
-      <div className="flex items-center justify-between gap-2">
-        <div className="eyebrow">Chat History</div>
-        <button onClick={() => { newConversation(ctxLabel); setShowHistory(false); }} className="btn btn-secondary px-3 py-1.5 text-sm gap-1.5">
-          <Plus className="w-3.5 h-3.5" strokeWidth={1.75} /> New Chat
-        </button>
-      </div>
-      <div className="space-y-1">
-        {conversations.map((c) => (
-          <button
-            key={c.id}
-            onClick={() => { setActiveId(c.id); setShowHistory(false); }}
-            className={`w-full flex items-center gap-2 text-left rounded-lg px-3 py-2.5 transition-colors ${
-              c.id === active.id ? "bg-tint text-deep" : "text-ink hover:bg-wash"
-            }`}
-          >
-            <MessageSquare className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
-            <span className="text-sm truncate">{c.title}</span>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-
   const conversationPane = (
     <>
       {toolbar}
@@ -1468,37 +1695,36 @@ export function AssistantPanel() {
           <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-8 w-1 rounded-full bg-line group-hover:bg-brand transition-colors" />
         </div>
       )}
-      {header}
+      {conversationHeader}
       {expanded ? (
         <div className="flex-1 min-h-0 flex">
-          <div className="w-[240px] shrink-0 border-r border-line bg-offwhite flex flex-col min-h-0">
-            <div className="p-4 shrink-0">
-              <button onClick={() => newConversation(ctxLabel)} className="w-full btn btn-secondary gap-1.5">
-                <Plus className="w-4 h-4" strokeWidth={1.75} /> New Chat
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto px-3 pb-4 min-h-0">
-              <div className="eyebrow px-2 mb-2">Chat History</div>
-              <div className="space-y-1">
-                {conversations.map((c) => (
-                  <button
-                    key={c.id}
-                    onClick={() => setActiveId(c.id)}
-                    className={`w-full flex items-center gap-2 text-left px-2.5 py-2 rounded-lg transition-colors ${
-                      c.id === active.id ? "bg-tint text-deep" : "text-ink hover:bg-wash"
-                    }`}
-                  >
-                    <MessageSquare className="w-3.5 h-3.5 shrink-0 text-deep" strokeWidth={1.75} />
-                    <span className="text-sm truncate">{c.title}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
+          <AssistantHistory
+            conversations={conversations}
+            activeId={active.id}
+            collapsed={sidebarCollapsed}
+            onToggleCollapsed={() => setSidebarCollapsed((collapsed) => !collapsed)}
+            onSelect={setActiveId}
+            onNewChat={() => newConversation(ctxLabel)}
+            onTogglePin={togglePinned}
+            onRename={renameConversation}
+            onDelete={deleteConversation}
+          />
           <div className="flex-1 min-w-0 flex flex-col min-h-0">{conversationPane}</div>
         </div>
       ) : (
-        showHistory ? historyPanel : conversationPane
+        showHistory ? (
+          <AssistantHistory
+            conversations={conversations}
+            activeId={active.id}
+            collapsed={false}
+            onToggleCollapsed={() => setShowHistory(false)}
+            onSelect={(id) => { setActiveId(id); setShowHistory(false); }}
+            onNewChat={() => { newConversation(ctxLabel); setShowHistory(false); }}
+            onTogglePin={togglePinned}
+            onRename={renameConversation}
+            onDelete={deleteConversation}
+          />
+        ) : conversationPane
       )}
     </aside>
   );
