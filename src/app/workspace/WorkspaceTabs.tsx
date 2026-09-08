@@ -6,7 +6,7 @@ import {
   Gavel, MessageSquare, SlidersHorizontal,
   HeartPulse, ClipboardList, Image as ImageIcon, Video, FileSignature, Quote,
   Pencil, RotateCcw, History, TrendingUp, TrendingDown, Info, Shield, Circle, Loader2, Bot, Send,
-  Plus, UserPlus, Receipt, Trash2,
+  Plus, UserPlus, Receipt, Trash2, Check,
 } from "lucide-react";
 import type { AnalysisFinding, CaseDocument } from "../types/case";
 import { classifyDocuments } from "../types/case";
@@ -23,6 +23,10 @@ import {
   type FactorItem, type FactorProvenance, type Severity,
 } from "../damages/FactorsContext";
 import { FactorReasoning } from "./FactorReasoning";
+import {
+  usePillarsOptional, attorneyPillarActor, PILLAR_SEED, PILLAR_PROVENANCE_LABEL, PILLAR_ACTION_LABEL,
+  type PillarItem, type PillarAudit,
+} from "./PillarsContext";
 import {
   useDamagesOptional, attorneyActor, formatDamageUSD, ECONOMIC_CATEGORIES,
   DAMAGE_SEED, DAMAGE_PROVENANCE_LABEL, DAMAGE_ACTION_LABEL, DAMAGE_FIELD_LABEL, BUCKET_LABEL,
@@ -3005,6 +3009,8 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
   // "View Details" drawer for a damage factor.
   const [detailFactor, setDetailFactor] = useState<string | null>(null);
   const [detailDocsOpen, setDetailDocsOpen] = useState(false);
+  // The whole Supporting Documents block, collapsed until asked for.
+  const [detailDocsSectionOpen, setDetailDocsSectionOpen] = useState(false);
   const [detailChatOpen, setDetailChatOpen] = useState(false);
   // Precedent case detail drawer from the Intelligence cards.
   const [selectedPrecedent, setSelectedPrecedent] = useState<(typeof COMPARABLE_VERDICTS)[number] | null>(null);
@@ -4356,9 +4362,18 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
                       </div>
                     </div>
 
+                    {/* Collapsed by default: the drawer is about the reasoning,
+                        and the file list is a click away when it is wanted. */}
                     <div>
-                      <div className="eyebrow mb-2">Supporting Documents ({f.docCount})</div>
-                      <div className="space-y-1.5">
+                      <button
+                        onClick={() => setDetailDocsSectionOpen((v) => !v)}
+                        aria-expanded={detailDocsSectionOpen}
+                        className="w-full flex items-center justify-between gap-2 py-1 text-left group"
+                      >
+                        <span className="eyebrow">Supporting Documents ({f.docCount})</span>
+                        <ChevronDown className={`w-4 h-4 text-[#5B6B78] shrink-0 transition-transform ${detailDocsSectionOpen ? "rotate-180" : ""}`} strokeWidth={1.75} />
+                      </button>
+                      <div className={`space-y-1.5 mt-2 ${detailDocsSectionOpen ? "" : "hidden"}`}>
                         {(detailDocsOpen ? docNames : docNames.slice(0, 5)).map((name) => (
                           <button
                             key={name}
@@ -4427,37 +4442,18 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
 // the negligent events (expected vs actual), the evidence proving each, the AI
 // assessment, the supporting documents, and the overall liability strength.
 
-// Section 1 — the four legal elements of negligence.
-const NEGLIGENCE_PILLARS = [
-  {
-    no: "01", title: "Duty of Care", subtitle: "What was expected?", icon: ShieldCheck, confidence: 97,
-    body: "Under Texas Nursing Standards and the facility's custodial care agreement, staff were required to administer physician-prescribed Plavix continuously, monitor neurological symptoms, and initiate emergency stroke protocols without delay.",
-    insight: "Physician orders, the custodial care agreement, and Texas nursing standards together establish a clear, non-discretionary duty to medicate and monitor the resident.",
-    docCount: 5,
-    docs: ["Physician_Prescription_Orders.pdf", "Custodial_Care_Agreement.pdf", "Texas_Nursing_Standards.pdf"],
-  },
-  {
-    no: "02", title: "Breach of Duty", subtitle: "What failed?", icon: AlertTriangle, confidence: 98,
-    body: "The facility failed to administer prescribed medication for five consecutive days and delayed emergency stroke response, violating accepted nursing standards and physician instructions.",
-    insight: "The medication record and pharmacy log show five consecutive missed Plavix doses, and the stroke-protocol checklist was never initiated — a documented departure from the required standard of care.",
-    docCount: 18,
-    docs: ["Medication_Administration_Record.pdf", "Pharmacy_Dispensing_Log.pdf", "Nursing_Shift_Notes.pdf", "Stroke_Protocol_Checklist.pdf"],
-  },
-  {
-    no: "03", title: "Causation", subtitle: "How did the breach lead to the injury?", icon: Activity, confidence: 96,
-    body: "The prolonged medication omission and delayed emergency response directly contributed to arterial thrombosis, irreversible neurological damage, and the plaintiff's catastrophic injuries.",
-    insight: "Neurology and admission records tie the medication omission and the 2.5-hour dispatch delay directly to the ischemic stroke and its irreversible progression.",
-    docCount: 9,
-    docs: ["Neurology_Consultation_Report.pdf", "Hospital_Admission_Records.pdf", "EMS_Dispatch_Report.pdf"],
-  },
-  {
-    no: "04", title: "Damages", subtitle: "What harm resulted?", icon: HeartPulse, confidence: 99,
-    body: "The negligence resulted in permanent neurological impairment, loss of independence, extensive medical treatment, significant emotional suffering, and ultimately wrongful death.",
-    insight: "Admission records, the neurology report, and the death certificate document permanent neurological impairment and the ultimate wrongful death resulting from the negligence.",
-    docCount: 7,
-    docs: ["Hospital_Admission_Records.pdf", "Neurology_Consultation_Report.pdf", "Death_Certificate.pdf"],
-  },
-];
+// Section 1 — the legal elements of negligence. Icons live here rather than on
+// the record so the store stays plain data; a pillar added later falls back to
+// the generic legal icon.
+const PILLAR_ICON: Record<string, typeof ShieldCheck> = {
+  shield: ShieldCheck, alert: AlertTriangle, activity: Activity, heart: HeartPulse,
+};
+
+const pillarIcon = (key: string) => PILLAR_ICON[key] ?? Scale;
+
+// The elements on file at load. Module-level helpers (stage citations) read
+// this; the stage itself reads the live store, so an edit shows immediately.
+const NEGLIGENCE_PILLARS = PILLAR_SEED;
 
 // AI reasoning for why this constitutes negligence (concise).
 const AI_REASONING = [
@@ -4488,15 +4484,339 @@ function ConfidenceRing({ value }: { value: number }) {
   );
 }
 
+// ── Attorney editing of the negligence pillars ───────────────────────────────
+// One Edit action per card, and the form replaces the card in place rather than
+// opening over the stage. Deleting and reading a pillar's history live inside
+// that form, so the cards stay a reading surface.
+
+interface PillarDraft {
+  title: string;
+  subtitle: string;
+  body: string;
+  /** The documents this pillar cites, as a list rather than typed text. */
+  docs: string[];
+}
+
+const pillarDraftOf = (p: PillarItem): PillarDraft => ({
+  title: p.title,
+  subtitle: p.subtitle,
+  body: p.body,
+  docs: [...p.docs],
+});
+
+const blankPillarDraft = (): PillarDraft => ({ title: "", subtitle: "", body: "", docs: [] });
+
+// A labelled field in the pillar form.
+function PillarField({
+  label, value, onChange, rows, hint, placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  rows?: number;
+  hint?: string;
+  placeholder?: string;
+}) {
+  const cls = "w-full rounded-lg border border-line bg-white px-2.5 py-1.5 text-sm text-ink focus:outline-none focus:border-brand transition-colors";
+  return (
+    <div>
+      <label className="eyebrow block mb-1">{label}</label>
+      {rows ? (
+        <textarea value={value} rows={rows} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} className={`${cls} resize-y`} />
+      ) : (
+        <input value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} className={cls} />
+      )}
+      {hint && <p className="text-[11px] text-[#8A98A3] mt-1">{hint}</p>}
+    </div>
+  );
+}
+
+// Supporting evidence, edited as a list rather than typed as text. Removing a
+// chip detaches the document from this pillar; the file stays on the case and
+// can be cited by another pillar.
+function EvidenceEditor({
+  docs, onChange, available,
+}: { docs: string[]; onChange: (d: string[]) => void; available: string[] }) {
+  const [picking, setPicking] = useState(false);
+  const [query, setQuery] = useState("");
+  const [chosen, setChosen] = useState<string[]>([]);
+
+  // Everything on the case that this pillar does not already cite.
+  const attached = new Set(docs);
+  const offered = available
+    .filter((d) => !attached.has(d))
+    .filter((d) => d.toLowerCase().includes(query.trim().toLowerCase()));
+
+  const openPicker = () => { setChosen([]); setQuery(""); setPicking(true); };
+  const commit = () => { if (chosen.length > 0) onChange([...docs, ...chosen]); setPicking(false); };
+
+  return (
+    <div>
+      <label className="eyebrow block mb-1">Supporting Evidence</label>
+      {docs.length === 0 && !picking && (
+        <p className="secondary-text mb-2">No documents are cited by this pillar yet.</p>
+      )}
+      <div className="flex flex-wrap gap-1.5">
+        {docs.map((d) => (
+          <span key={d} className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-white pl-2.5 pr-1.5 py-1.5 text-xs text-ink">
+            <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+            <span className="truncate max-w-[180px]">{d}</span>
+            <button
+              onClick={() => onChange(docs.filter((x) => x !== d))}
+              title={`Remove ${d} from this pillar`}
+              aria-label={`Remove ${d} from this pillar`}
+              className="p-0.5 rounded text-[#8A98A3] hover:bg-[#FEF4F3] hover:text-[#B42318] transition-colors"
+            >
+              <X className="w-3.5 h-3.5" strokeWidth={2} />
+            </button>
+          </span>
+        ))}
+      </div>
+      {!picking ? (
+        <button
+          onClick={openPicker}
+          className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-dashed border-soft bg-white text-xs font-semibold text-deep hover:border-brand hover:bg-tint transition-colors"
+        >
+          <Plus className="w-3.5 h-3.5" strokeWidth={2} /> Add Supporting Document
+        </button>
+      ) : (
+        <div className="mt-2 rounded-xl border border-line bg-white p-3">
+          <div className="eyebrow mb-2">Select supporting documents</div>
+          <div className="relative mb-2">
+            <Search className="w-3.5 h-3.5 text-[#8A98A3] absolute left-2.5 top-1/2 -translate-y-1/2" strokeWidth={1.75} />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search case documents…"
+              className="w-full rounded-lg border border-line bg-white pl-8 pr-2.5 py-1.5 text-sm text-ink focus:outline-none focus:border-brand transition-colors"
+            />
+          </div>
+          <div className="max-h-[180px] overflow-y-auto divide-y divide-line border border-line rounded-lg">
+            {offered.length === 0 ? (
+              <p className="secondary-text p-2.5">
+                {query.trim() ? "No case documents match that." : "Every case document is already cited here."}
+              </p>
+            ) : offered.map((d) => {
+              const on = chosen.includes(d);
+              return (
+                <button
+                  key={d}
+                  onClick={() => setChosen((prev) => (on ? prev.filter((x) => x !== d) : [...prev, d]))}
+                  className="w-full flex items-center gap-2.5 px-2.5 py-2 text-left hover:bg-wash transition-colors"
+                >
+                  <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${on ? "bg-brand border-brand" : "border-line bg-white"}`}>
+                    {on && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
+                  </span>
+                  <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+                  <span className="mono-ref text-ink truncate">{d}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex items-center justify-between gap-2 mt-2.5">
+            <span className="text-xs text-[#8A98A3]">
+              {chosen.length === 0 ? "None selected" : `${chosen.length} selected`}
+            </span>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setPicking(false)} className="btn btn-secondary px-2.5 py-1.5 text-xs">Cancel</button>
+              <button onClick={commit} className="btn btn-primary px-2.5 py-1.5 text-xs">Done</button>
+            </div>
+          </div>
+        </div>
+      )}
+      <p className="text-[11px] text-[#8A98A3] mt-1.5">
+        Removing a document releases this pillar's citation. The document stays on the case file.
+      </p>
+    </div>
+  );
+}
+
+// The pillar form, used both for editing an existing element and adding a new
+// one. Same fields either way, so the two cannot drift apart.
+function PillarForm({
+  title, no, draft, setDraft, onCancel, onSave, saveLabel, onDelete, onHistory, available,
+}: {
+  title: string;
+  no: string;
+  draft: PillarDraft;
+  setDraft: (d: PillarDraft) => void;
+  onCancel: () => void;
+  onSave: () => void;
+  saveLabel: string;
+  /** Every document on the case, for the evidence picker. */
+  available: string[];
+  /** Editing an existing pillar only — absent when adding a new one. */
+  onDelete?: () => void;
+  onHistory?: () => void;
+}) {
+  const set = (k: "title" | "subtitle" | "body") => (v: string) => setDraft({ ...draft, [k]: v });
+  const valid = draft.title.trim().length > 0;
+  return (
+    <div className="border border-[#D6F2F7] rounded-xl bg-[#F6FDFF] p-5 flex flex-col gap-3">
+      <div className="flex items-center justify-between gap-3">
+        <span className="eyebrow text-deep">{title}</span>
+        <span className="eyebrow text-[#8A98A3]">Pillar {no}</span>
+      </div>
+      <PillarField label="Title" value={draft.title} onChange={set("title")} placeholder="Enter pillar title" />
+      <PillarField label="Question" value={draft.subtitle} onChange={set("subtitle")} placeholder="What was expected?" />
+      <PillarField label="Analysis" value={draft.body} onChange={set("body")} rows={5} placeholder="Describe the legal analysis for this element…" />
+      <EvidenceEditor docs={draft.docs} onChange={(docs) => setDraft({ ...draft, docs })} available={available} />
+      <div className="flex items-center justify-between gap-3 flex-wrap pt-1">
+        <div className="flex items-center gap-3">
+          {onHistory && (
+            <button onClick={onHistory} className="inline-flex items-center gap-1.5 text-xs font-semibold text-deep hover:text-ink transition-colors">
+              <History className="w-3.5 h-3.5" strokeWidth={1.75} /> History
+            </button>
+          )}
+          {onDelete && (
+            <button onClick={onDelete} className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#B42318] hover:text-[#96200F] transition-colors">
+              <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} /> Delete pillar
+            </button>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={onCancel} className="btn btn-secondary px-3 py-2 text-sm">Cancel</button>
+          <button onClick={onSave} disabled={!valid} className="btn btn-primary px-3 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+            {saveLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Deleting a pillar removes an element of the case, so it is always confirmed
+// and always says what happens to the evidence behind it.
+function DeletePillarDialog({
+  item, onCancel, onConfirm,
+}: { item: PillarItem; onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <>
+      <div className="fixed inset-0 bg-ink/40 z-[80]" onClick={onCancel} />
+      <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[80] w-[440px] max-w-[92vw] rounded-2xl border border-line bg-white shadow-xl p-5">
+        <div className="flex items-center gap-2 mb-2.5">
+          <AlertTriangle className="w-4 h-4 text-[#B42318] shrink-0" strokeWidth={1.75} />
+          <h3 className="card-title">Delete Negligence Pillar?</h3>
+        </div>
+        <p className="body-text leading-relaxed">
+          Are you sure you want to delete &ldquo;{item.title}&rdquo;? This will remove this negligence pillar
+          from the current case.
+        </p>
+        {item.docs.length > 0 && (
+          <div className="rounded-xl border border-[#FDE6C8] bg-[#FFF7ED] px-3.5 py-3 mt-3">
+            <div className="flex items-center gap-1.5 mb-1">
+              <FileText className="w-3.5 h-3.5 text-[#B45309] shrink-0" strokeWidth={1.75} />
+              <span className="eyebrow text-[#B45309]">{item.docCount} supporting documents</span>
+            </div>
+            <p className="secondary-text">
+              The pillar's citation of this evidence is released. The documents themselves stay on the case file.
+            </p>
+          </div>
+        )}
+        <div className="flex items-center justify-end gap-2 mt-4">
+          <button onClick={onCancel} className="btn btn-secondary px-3 py-2 text-sm">Cancel</button>
+          <button
+            onClick={onConfirm}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold text-white bg-[#B42318] hover:bg-[#96200F] transition-colors"
+          >
+            <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} /> Delete
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// The change history for one pillar — every action, who made it and when.
+function PillarHistoryDrawer({
+  item, entries, onClose,
+}: { item: PillarItem; entries: PillarAudit[]; onClose: () => void }) {
+  const newestFirst = [...entries].reverse();
+  return (
+    <>
+      <div className="fixed inset-0 bg-ink/40 z-[70]" onClick={onClose} />
+      <div className="fixed top-0 right-0 h-full w-[460px] max-w-[92vw] bg-white shadow-xl z-[70] flex flex-col">
+        <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-line shrink-0">
+          <div className="min-w-0">
+            <div className="eyebrow mb-1">Pillar History</div>
+            <h2 className="card-title">{item.title}</h2>
+            <div className="mono-ref mt-1">Pillar {item.no} · {PILLAR_PROVENANCE_LABEL[item.provenance]}</div>
+          </div>
+          <button onClick={onClose} title="Close" className="p-1.5 hover:bg-tint rounded-lg transition-colors shrink-0">
+            <X className="w-5 h-5 text-[#5B6B78]" strokeWidth={1.75} />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-5">
+          {newestFirst.length === 0 ? (
+            <p className="secondary-text">
+              No changes recorded. This pillar is as the AI first put it on the case.
+            </p>
+          ) : (
+            <div className="relative">
+              {newestFirst.map((e, i) => (
+                <div key={e.id} className="relative flex gap-3 pb-6 last:pb-0">
+                  <div className="flex flex-col items-center shrink-0">
+                    <div className="w-2.5 h-2.5 rounded-full bg-white border-2 border-brand mt-1.5" />
+                    {i < newestFirst.length - 1 && <div className="w-px flex-1 bg-line mt-1.5" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-semibold text-ink">{PILLAR_ACTION_LABEL[e.action]}</span>
+                      <span className="mono-ref">{e.at}</span>
+                    </div>
+                    <p className="text-xs text-[#8A98A3] mt-0.5">{e.changedBy}</p>
+                    {/* An evidence change is one document in or out, so it
+                        reads as that rather than as a before/after pair. */}
+                    {(e.action === "evidence-added" || e.action === "evidence-removed") && (
+                      <div className="rounded-xl border border-line mt-2 px-3.5 py-2">
+                        <div className="flex items-center gap-1.5">
+                          <span className={`text-sm font-semibold ${e.action === "evidence-added" ? "text-[#15803D]" : "text-[#B42318]"}`}>
+                            {e.action === "evidence-added" ? "+" : "−"}
+                          </span>
+                          <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+                          <span className="mono-ref text-ink">{e.next ?? e.previous}</span>
+                        </div>
+                      </div>
+                    )}
+                    {e.previous !== undefined && e.next !== undefined && e.action !== "created" && e.action !== "deleted" && (
+                      <div className="rounded-xl border border-line divide-y divide-line mt-2">
+                        <div className="px-3.5 py-2">
+                          <div className="eyebrow mb-0.5">Previous</div>
+                          <p className="body-text leading-relaxed">{e.previous || "—"}</p>
+                        </div>
+                        <div className="px-3.5 py-2">
+                          <div className="eyebrow mb-0.5">New</div>
+                          <p className="body-text leading-relaxed font-medium">{e.next || "—"}</p>
+                        </div>
+                      </div>
+                    )}
+                    {e.reason && (
+                      <p className="secondary-text mt-2 italic">&ldquo;{e.reason}&rdquo;</p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
 export function NonEconomicDamagesTab({ goTo, documents }: TabProps) {
   // Shared Document Workspace — Preview / Insights for each pillar's evidence.
   const [wsOpen, setWsOpen] = useState(false);
   const [wsIndex, setWsIndex] = useState(0);
   const [wsView, setWsView] = useState<"preview" | "insights">("preview");
   const docForFile = buildDocResolver(documents);
-  const negDocSets = NEGLIGENCE_PILLARS.map((p) => padDocsToCount(p.docs, p.title, p.docCount).map(docForFile));
-  const negContexts = NEGLIGENCE_PILLARS.map((p) => ({ contextType: "Negligence Element", reference: p.title }));
-  const negInsights = NEGLIGENCE_PILLARS.map((p) => ({
+  // The pillars, live. A rename reaches the cards, the evidence workspace and
+  // the insight panels together because they all read this one list.
+  const pillarStore = usePillarsOptional();
+  const pillars = pillarStore?.pillars ?? NEGLIGENCE_PILLARS;
+  const negDocSets = pillars.map((p) => padDocsToCount(p.docs, p.title, p.docCount).map(docForFile));
+  const negContexts = pillars.map((p) => ({ contextType: "Negligence Element", reference: p.title }));
+  const negInsights = pillars.map((p) => ({
     summary: p.insight,
     keyPoints: p.docs.map((d) => `${d.replace(/_/g, " ").replace(/\.pdf$/, "")} reviewed and verified.`),
     entities: [
@@ -4507,7 +4827,7 @@ export function NonEconomicDamagesTab({ goTo, documents }: TabProps) {
     confidence: { level: "High", score: p.confidence },
   }));
   // Document Context Panel data for the preview rail (per negligence element).
-  const negPanels = NEGLIGENCE_PILLARS.map((p) => ({
+  const negPanels = pillars.map((p) => ({
     summary: [
       { label: "Element", value: p.title },
       { label: "Confidence", value: `${p.confidence}%` },
@@ -4515,6 +4835,63 @@ export function NonEconomicDamagesTab({ goTo, documents }: TabProps) {
     ],
   }));
   const openNeg = (i: number, view: "preview" | "insights" = "preview") => { setWsIndex(i); setWsView(view); setWsOpen(true); };
+
+  // ── Attorney editing ─────────────────────────────────────────────────────
+  // Which card is in edit mode, which is pending deletion, and whether the add
+  // form is open. Every handler calls a store operation; this component holds
+  // no provenance or history logic of its own.
+  const [editingPillar, setEditingPillar] = useState<string | null>(null);
+  const [deletingPillar, setDeletingPillar] = useState<string | null>(null);
+  const [historyPillar, setHistoryPillar] = useState<string | null>(null);
+  const [addingPillar, setAddingPillar] = useState(false);
+  const [pillarDraft, setPillarDraft] = useState<PillarDraft>(blankPillarDraft());
+  const pillarActor = attorneyPillarActor(CURRENT_USER);
+  const caseDocumentNames = Array.from(
+    new Set([...documents.map((d) => d.name), ...pillars.flatMap((p) => p.docs)]),
+  ).sort((a, b) => a.localeCompare(b));
+  const deletingPillarItem = pillars.find((p) => p.id === deletingPillar) ?? null;
+  const historyPillarItem = pillars.find((p) => p.id === historyPillar) ?? null;
+
+  const savePillar = (item: PillarItem, draft: PillarDraft) => {
+    if (!pillarStore) return;
+    const docs = draft.docs;
+    pillarStore.updatePillar(
+      item.id,
+      {
+        title: draft.title.trim() || item.title,
+        subtitle: draft.subtitle,
+        body: draft.body,
+        docs,
+        // A pillar that now cites a different set of documents says so in its
+        // count, but never below the number it actually lists.
+        docCount: docs.length === item.docs.length ? item.docCount : Math.max(item.docCount - item.docs.length, 0) + docs.length,
+      },
+      pillarActor,
+    );
+    setEditingPillar(null);
+  };
+
+  const addPillar = (draft: PillarDraft) => {
+    if (!pillarStore) return;
+    const docs = draft.docs;
+    pillarStore.createPillar(
+      {
+        id: `pillar-${Math.round(performance.now())}-${Math.random().toString(36).slice(2, 6)}`,
+        title: draft.title.trim(),
+        subtitle: draft.subtitle,
+        body: draft.body,
+        // Written by the attorney, so there is no AI summary or confidence to
+        // show — the card omits both rather than borrowing another pillar's.
+        insight: "",
+        confidence: 0,
+        docs,
+        docCount: docs.length,
+        iconKey: "scale",
+      },
+      pillarActor,
+    );
+    setAddingPillar(false);
+  };
 
   // Which pillar cards have their Supporting Documents AI summary expanded.
   const [pillarExpand, setPillarExpand] = useState<Set<number>>(new Set());
@@ -4532,24 +4909,102 @@ export function NonEconomicDamagesTab({ goTo, documents }: TabProps) {
       {/* ── Core Negligence Framework (70%) + AI Assessment (30%) side by side ── */}
       <div className="grid grid-cols-1 lg:grid-cols-10 gap-6 items-start">
       <div className="lg:col-span-7 lg:order-1 lg-card bg-offwhite p-6">
-        <h2 className="section-header mb-5">Negligence Analysis</h2>
+        <div className="flex items-center justify-between gap-3 mb-5">
+          <h2 className="section-header">Negligence Analysis</h2>
+          {pillarStore && !addingPillar && (
+            <button
+              onClick={() => { setEditingPillar(null); setPillarDraft(blankPillarDraft()); setAddingPillar(true); }}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-line bg-white text-xs font-semibold text-deep hover:border-brand transition-colors shrink-0"
+            >
+              <Plus className="w-3.5 h-3.5" strokeWidth={2} /> Add Pillar
+            </button>
+          )}
+        </div>
+        {addingPillar && (
+          <div className="mb-4">
+            <PillarForm
+              title="Add Negligence Pillar"
+              no={String(pillars.length + 1).padStart(2, "0")}
+              draft={pillarDraft}
+              setDraft={setPillarDraft}
+              onCancel={() => setAddingPillar(false)}
+              onSave={() => addPillar(pillarDraft)}
+              saveLabel="Add Pillar"
+              available={caseDocumentNames}
+            />
+          </div>
+        )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {NEGLIGENCE_PILLARS.map((p, i) => {
+          {pillars.map((p, i) => {
             const shown = p.docs.slice(0, 1);
             const more = p.docCount - shown.length;
+            const Icon = pillarIcon(p.iconKey);
+            const changed = p.provenance !== "ai-generated";
+
+            if (editingPillar === p.id && pillarStore) {
+              return (
+                <PillarForm
+                  key={p.id}
+                  title={`Edit ${p.title}`}
+                  no={p.no}
+                  draft={pillarDraft}
+                  setDraft={setPillarDraft}
+                  onCancel={() => setEditingPillar(null)}
+                  onSave={() => savePillar(p, pillarDraft)}
+                  saveLabel="Save Changes"
+                  available={caseDocumentNames}
+                  onDelete={() => setDeletingPillar(p.id)}
+                  onHistory={() => setHistoryPillar(p.id)}
+                />
+              );
+            }
+
             return (
-              <div key={p.no} className="border border-line rounded-xl bg-white p-6 flex flex-col gap-4">
+              <div key={p.id} className="border border-line rounded-xl bg-white p-6 flex flex-col gap-4">
                 {/* Legal reasoning */}
                 <div>
                   <div className="flex items-center justify-between gap-3 mb-3">
                     <span className="eyebrow text-deep">Pillar {p.no}</span>
-                    <div className="w-9 h-9 rounded-lg bg-tint flex items-center justify-center shrink-0">
-                      <p.icon className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                    <div className="flex items-center gap-2 shrink-0">
+                      {pillarStore && (
+                        <button
+                          onClick={() => { setAddingPillar(false); setPillarDraft(pillarDraftOf(p)); setEditingPillar(p.id); }}
+                          title="Edit pillar"
+                          aria-label={`Edit ${p.title}`}
+                          className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-semibold text-[#8A98A3] hover:bg-tint hover:text-deep transition-colors"
+                        >
+                          <Pencil className="w-3.5 h-3.5" strokeWidth={1.75} /> Edit
+                        </button>
+                      )}
+                      <div className="w-9 h-9 rounded-lg bg-tint flex items-center justify-center shrink-0">
+                        <Icon className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                      </div>
                     </div>
                   </div>
-                  <h3 className="card-title" style={{ fontSize: "18px" }}>{p.title}</h3>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="card-title" style={{ fontSize: "18px" }}>{p.title}</h3>
+                    {changed && (
+                      <span className="pill pill-neutral">
+                        {p.provenance.startsWith("ai")
+                          ? <Sparkles className="w-3 h-3" strokeWidth={1.75} />
+                          : <UserPlus className="w-3 h-3" strokeWidth={1.75} />}
+                        {PILLAR_PROVENANCE_LABEL[p.provenance]}
+                      </span>
+                    )}
+                  </div>
                   <p className="text-sm font-medium text-deep mt-0.5 mb-3">{p.subtitle}</p>
                   <p className="body-text leading-relaxed">{p.body}</p>
+                  {/* The AI read the wording as it was. Once that wording is
+                      rewritten by hand, its analysis is stale and says so
+                      rather than being presented as current. */}
+                  {p.aiStale && (
+                    <div className="mt-3 flex items-start gap-1.5 rounded-lg border border-[#FDE6C8] bg-[#FFF7ED] px-2.5 py-2">
+                      <AlertTriangle className="w-3.5 h-3.5 text-[#B45309] shrink-0 mt-0.5" strokeWidth={1.75} />
+                      <p className="text-[11px] text-[#B45309] leading-relaxed">
+                        This element has been edited since the AI analysed it. The AI summary and confidence below may be out of date.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 {/* Supporting documents — header dropdown reveals the AI summary */}
@@ -4586,8 +5041,11 @@ export function NonEconomicDamagesTab({ goTo, documents }: TabProps) {
                       <div className="flex items-center gap-1.5 mb-1.5">
                         <Sparkles className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
                         <span className="eyebrow text-deep">AI Summary</span>
+                        {p.aiStale && <span className="pill pill-progress">May be out of date</span>}
                       </div>
-                      <p className="secondary-text leading-relaxed">{p.insight}</p>
+                      <p className="secondary-text leading-relaxed">
+                        {p.insight || "This element was written by the attorney and has not been analysed by the AI."}
+                      </p>
                     </div>
                   )}
                 </div>
@@ -4652,6 +5110,28 @@ export function NonEconomicDamagesTab({ goTo, documents }: TabProps) {
       onClose={() => setWsOpen(false)}
       onDownload={() => {}}
     />
+
+    {/* Confirmation before a pillar is removed, and the change history for one
+        pillar. Both are dismissible and change nothing on open. */}
+    {deletingPillarItem && pillarStore && (
+      <DeletePillarDialog
+        item={deletingPillarItem}
+        onCancel={() => setDeletingPillar(null)}
+        onConfirm={() => {
+          pillarStore.deletePillar(deletingPillarItem.id, pillarActor, "Deleted by attorney on the Negligence stage.");
+          setDeletingPillar(null);
+          // The form was open on a pillar that no longer exists.
+          setEditingPillar((id) => (id === deletingPillarItem.id ? null : id));
+        }}
+      />
+    )}
+    {historyPillarItem && pillarStore && (
+      <PillarHistoryDrawer
+        item={historyPillarItem}
+        entries={pillarStore.historyFor(historyPillarItem.id)}
+        onClose={() => setHistoryPillar(null)}
+      />
+    )}
     </>
   );
 }

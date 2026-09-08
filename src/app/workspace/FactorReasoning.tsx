@@ -1,12 +1,15 @@
 import { useState } from "react";
 import {
-  Sparkles, ChevronDown, Gavel, Scale, FileText, TrendingUp, ShieldCheck, Info,
+  Sparkles, ChevronDown, ChevronRight, Gavel, Scale, FileText, TrendingUp, ShieldCheck, Info,
+  MessageSquare, Send, Check,
 } from "lucide-react";
 import type { FactorItem } from "../damages/FactorsContext";
 import {
   summarisePrecedents, patternsAcross, compareToPrecedents, recommendationFor,
   settlementInfluence, whyItMatches, relevanceOf, positionAgainstPrecedents,
-  type PrecedentCase,
+  caseOverview, mapToCurrentCase, mappingNote, settlementContext, answerAboutPrecedent,
+  OVERVIEW_UNRECORDED,
+  type PrecedentCase, type CurrentCaseProfile,
 } from "../damages/precedentAnalysis";
 
 // ── Why the AI recommends this band ───────────────────────────────────────────
@@ -68,6 +71,246 @@ function Bullets({ items }: { items: string[] }) {
   );
 }
 
+// One precedent, expandable. Collapsed it is a name, a match and a number;
+// opened it reads as a short case brief — identity, why it was picked, what
+// happened, and what it means here — in that order.
+//
+// The card is one container. Inside it the sections are separated by hairlines
+// and section headings rather than by nested boxes, so the drawer stays compact
+// and the eye can run down a single column.
+
+// A heading inside the precedent card. Small, spaced, and the only thing that
+// separates one section from the next besides a hairline.
+function Part({
+  label, children, first = false,
+}: { label: string; children: React.ReactNode; first?: boolean }) {
+  return (
+    <div className={first ? "" : "pt-3 mt-3 border-t border-line"}>
+      <div className="eyebrow mb-1.5">{label}</div>
+      {children}
+    </div>
+  );
+}
+
+// Tighter bullets than the drawer's default — a precedent lists findings, and
+// they should read as a list rather than as spaced paragraphs.
+function TightBullets({ items }: { items: string[] }) {
+  return (
+    <ul className="space-y-0.5">
+      {items.map((t, i) => (
+        <li key={i} className="flex items-start gap-2">
+          <span className="w-1 h-1 rounded-full bg-deep mt-[7px] shrink-0" />
+          <span className="text-xs text-[#5B6B78] leading-relaxed">{t}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function PrecedentCard({
+  c, s, current, defaultOpen,
+}: { c: PrecedentCase; s: ReturnType<typeof summarisePrecedents>; current: CurrentCaseProfile; defaultOpen: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const [overviewOpen, setOverviewOpen] = useState(false);
+  const overview = caseOverview(c);
+  const rows = mapToCurrentCase(c, current);
+  const ctx = settlementContext(c, s);
+  const high = relevanceOf(c.matchScore) === "high";
+
+  return (
+    <div className="rounded-xl border border-line overflow-hidden bg-white">
+      {/* Identity first: the name is the strongest thing on the card, the match
+          sits opposite it, and the settlement is a labelled figure rather than
+          another line of prose. */}
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="w-full p-3.5 text-left hover:bg-wash transition-colors"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-2 min-w-0">
+            {open
+              ? <ChevronDown className="w-4 h-4 text-deep shrink-0 mt-1" strokeWidth={1.75} />
+              : <ChevronRight className="w-4 h-4 text-[#5B6B78] shrink-0 mt-1" strokeWidth={1.75} />}
+            <h4 className="card-title leading-snug min-w-0">{c.caseName}</h4>
+          </div>
+          <span className={`pill shrink-0 ${high ? "pill-complete" : "pill-neutral"}`}>{c.matchScore}% match</span>
+        </div>
+        <div className="flex items-baseline gap-2 mt-1.5 pl-6">
+          <span className="eyebrow">Settlement</span>
+          <span className="text-sm font-bold text-ink tabular-nums">{money(c.amount)}</span>
+        </div>
+      </button>
+
+      {open && (
+        <div className="px-3.5 pb-3.5">
+          {/* Why the AI picked it */}
+          <Part label="Why it matches" first>
+            <TightBullets items={whyItMatches(c)} />
+          </Part>
+
+          {/* What it does to this valuation — the one line to catch at a glance */}
+          <Part label="Settlement influence">
+            <div className="rounded-lg bg-tint border border-[#D6F2F7] px-3 py-2">
+              <p className="text-xs text-ink leading-relaxed">{settlementInfluence(c.amount, s)}</p>
+            </div>
+          </Part>
+
+          {/* What actually happened — one bordered disclosure, nothing nested
+              inside it but headings and hairlines. */}
+          <div className="pt-3 mt-3 border-t border-line">
+            <button
+              onClick={() => setOverviewOpen((o) => !o)}
+              aria-expanded={overviewOpen}
+              className="w-full flex items-center justify-between gap-2 text-left group"
+            >
+              <span className="eyebrow">Case overview</span>
+              <ChevronDown className={`w-3.5 h-3.5 text-[#5B6B78] shrink-0 transition-transform ${overviewOpen ? "rotate-180" : ""}`} strokeWidth={1.75} />
+            </button>
+            {overviewOpen && (
+              <div className="mt-2 rounded-lg bg-offwhite border border-line px-3 py-2.5 space-y-2.5">
+                {overview.map((o, i) => (
+                  <div key={o.label} className={i === 0 ? "" : "pt-2.5 border-t border-line"}>
+                    <div className="text-[10.5px] font-semibold uppercase tracking-[0.07em] text-[#5B6B78] mb-1">{o.label}</div>
+                    {o.body && <p className="text-xs text-[#5B6B78] leading-relaxed">{o.body}</p>}
+                    {/* Single-value dimensions read as label/value; findings
+                        stay bullets. Injury and severity are not findings. */}
+                    {o.facts.length > 0 && (
+                      <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 mb-1">
+                        {o.facts.map((f) => (
+                          <div key={f.label} className="contents">
+                            <span className="text-xs text-[#8A98A3]">{f.label}</span>
+                            <span className="text-xs text-ink font-medium">{f.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {o.items.length > 0 && <TightBullets items={o.items} />}
+                    {o.empty && <p className="text-[11px] text-[#8A98A3] italic">{OVERVIEW_UNRECORDED}</p>}
+                  </div>
+                ))}
+                <div className="pt-2.5 border-t border-line">
+                  <div className="text-[10.5px] font-semibold uppercase tracking-[0.07em] text-[#5B6B78] mb-1">Settlement outcome</div>
+                  <p className="text-sm font-bold text-ink tabular-nums">{money(ctx.amount)}</p>
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {ctx.factors.map((f) => <span key={f} className="pill pill-neutral">{f}</span>)}
+                  </div>
+                  <p className="text-xs text-[#5B6B78] leading-relaxed mt-1.5">{ctx.why}</p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* How it lines up here — the raw comparison, kept compact */}
+          <Part label="How it maps to the current case">
+            {rows.length === 0 ? (
+              <p className="text-[11px] text-[#8A98A3] italic">
+                The record carries no dimension for this case that can be set against the current one.
+              </p>
+            ) : (
+              <div className="rounded-lg border border-line overflow-hidden">
+                <div className="grid grid-cols-[minmax(64px,0.8fr)_1fr_1fr] gap-x-2 px-2.5 py-1.5 bg-wash border-b border-line">
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.06em] text-[#5B6B78]">Dimension</span>
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.06em] text-[#5B6B78]">Precedent</span>
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.06em] text-[#5B6B78]">This case</span>
+                </div>
+                {rows.map((r, i) => (
+                  <div
+                    key={r.attribute}
+                    className={`grid grid-cols-[minmax(64px,0.8fr)_1fr_1fr] gap-x-2 px-2.5 py-1.5 items-start ${i > 0 ? "border-t border-line" : ""}`}
+                  >
+                    <span className="text-[11px] text-[#8A98A3] leading-snug break-words">{r.attribute}</span>
+                    <span className="text-[11px] text-[#5B6B78] leading-snug break-words">{r.precedent}</span>
+                    <span className={`text-[11px] leading-snug break-words flex items-start gap-1 ${r.aligned ? "text-ink font-semibold" : "text-[#5B6B78]"}`}>
+                      {r.aligned && <Check className="w-3 h-3 text-[#15803D] shrink-0 mt-[3px]" strokeWidth={2.5} />}
+                      <span className="min-w-0">{r.current}</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Part>
+
+          {/* What the AI concludes from it — deliberately separate from the
+              comparison above, so reading is not mistaken for reasoning. */}
+          <Part label="AI interpretation">
+            <div className="rounded-lg bg-[#F6FDFF] border border-[#D6F2F7] px-3 py-2">
+              <p className="text-xs text-ink leading-relaxed">{mappingNote(c, current, s)}</p>
+            </div>
+          </Part>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// A question about one precedent, answered from that case's record alone. The
+// context is named above the box so it is never ambiguous which case is being
+// asked about.
+function PrecedentChat({
+  cases, s,
+}: { cases: PrecedentCase[]; s: ReturnType<typeof summarisePrecedents> }) {
+  const [subject, setSubject] = useState(cases[0]?.caseName ?? "");
+  const [question, setQuestion] = useState("");
+  const [thread, setThread] = useState<{ q: string; a: ReturnType<typeof answerAboutPrecedent> }[]>([]);
+  const c = cases.find((x) => x.caseName === subject) ?? cases[0];
+  if (!c) return null;
+
+  const ask = () => {
+    const q = question.trim();
+    if (!q) return;
+    setThread((prev) => [...prev, { q, a: answerAboutPrecedent(q, c, s) }]);
+    setQuestion("");
+  };
+
+  return (
+    <div className="rounded-xl border border-[#D6F2F7] bg-[#F6FDFF] p-3.5">
+      <div className="flex items-center gap-2 mb-2">
+        <MessageSquare className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+        <span className="eyebrow text-deep">Ask about this precedent case</span>
+      </div>
+      <div className="eyebrow mb-1">Chat context</div>
+      <select
+        value={subject}
+        onChange={(e) => { setSubject(e.target.value); setThread([]); }}
+        className="w-full rounded-lg border border-line bg-white px-2.5 py-1.5 text-sm text-ink focus:outline-none focus:border-brand transition-colors"
+      >
+        {cases.map((x) => <option key={x.caseName} value={x.caseName}>{x.caseName}</option>)}
+      </select>
+
+      {thread.length > 0 && (
+        <div className="space-y-2.5 mt-3">
+          {thread.map((t, i) => (
+            <div key={i}>
+              <div className="flex justify-end">
+                <span className="rounded-xl rounded-tr-sm bg-tint border border-[#D6F2F7] px-3 py-1.5 text-xs text-ink max-w-[85%]">{t.q}</span>
+              </div>
+              <div className="rounded-xl border border-line bg-white p-2.5 mt-1.5">
+                <p className="secondary-text leading-relaxed">{t.a.headline}</p>
+                {t.a.points.length > 0 && <Bullets items={t.a.points} />}
+                <p className="text-[11px] text-[#8A98A3] mt-1.5 leading-relaxed">{t.a.caveat}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="flex items-end gap-2 mt-2.5">
+        <input
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); ask(); } }}
+          placeholder={`Ask a question about ${c.caseName}…`}
+          className="flex-1 min-w-0 rounded-lg border border-line bg-white px-2.5 py-1.5 text-sm text-ink placeholder:text-[#9BA8B4] focus:outline-none focus:border-brand transition-colors"
+        />
+        <button onClick={ask} disabled={!question.trim()} className="btn btn-primary px-3 py-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+          <Send className="w-3.5 h-3.5" strokeWidth={1.75} /> Send
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function FactorReasoning({
   factor, precedents, economicTotal, caseType, jurisdiction, matchedByCorridor,
 }: {
@@ -91,6 +334,14 @@ export function FactorReasoning({
     jurisdiction,
   });
   const standing = positionAgainstPrecedents(rec.estimate, s);
+  const currentProfile: CurrentCaseProfile = {
+    severity: factor.severity,
+    caseType,
+    jurisdiction,
+    evidenceStrength: factor.evidence.strength,
+    docCount: factor.docCount,
+    estimate: rec.estimate,
+  };
   const strongestPattern = patterns[0];
 
   return (
@@ -155,23 +406,17 @@ export function FactorReasoning({
           Relevance bands are the recorded match scores grouped: 90%+ high, 75–89% moderate.
         </p>
 
+        {/* Only the closest match opens by default, so the section stays
+            scannable however many cases are on file. */}
         <div className="space-y-2.5 mt-3">
-          {s.cases.map((c) => (
-            <div key={c.caseName} className="rounded-xl border border-line p-3.5">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="card-title">{c.caseName}</div>
-                  <div className="mono-ref mt-0.5">{money(c.amount)}</div>
-                </div>
-                <span className={`pill shrink-0 ${relevanceOf(c.matchScore) === "high" ? "pill-complete" : "pill-neutral"}`}>
-                  {c.matchScore}% match
-                </span>
-              </div>
-              <div className="eyebrow mt-2.5 mb-1">Why it matches</div>
-              <Bullets items={whyItMatches(c)} />
-              <div className="eyebrow mt-2.5 mb-1">Settlement influence</div>
-              <p className="secondary-text leading-relaxed">{settlementInfluence(c.amount, s)}</p>
-            </div>
+          {s.cases.map((c, i) => (
+            <PrecedentCard
+              key={c.caseName}
+              c={c}
+              s={s}
+              current={currentProfile}
+              defaultOpen={i === 0 && s.cases.length <= 4}
+            />
           ))}
         </div>
       </Section>
@@ -291,6 +536,9 @@ export function FactorReasoning({
           <span className="font-semibold text-ink">Rebuttal:</span> {factor.defense.rebuttal}
         </p>
       </div>
+
+      {/* 10 — a question about one precedent, scoped to that case alone */}
+      {s.cases.length > 0 && <PrecedentChat cases={s.cases} s={s} />}
     </div>
   );
 }

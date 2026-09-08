@@ -163,3 +163,237 @@ export function positionAgainstPrecedents(estimate: number, s: PrecedentSummary)
   if (estimate <= s.lowest) return "lower";
   return "middle";
 }
+
+// ── One precedent, in full ────────────────────────────────────────────────────
+// The dataset records a summary, a similarity breakdown and a set of filter
+// values for each comparable case. These read those fields into the legal
+// dimensions an attorney wants them in. Where the dataset carries nothing for a
+// dimension the section says so — it is never filled in with a plausible guess.
+
+const UNRECORDED = "Not recorded in the precedent data.";
+
+const isRecorded = (v: string | undefined): v is string =>
+  !!v && v.trim().length > 0 && !/^not specified$/i.test(v);
+
+// The breakdown explanations whose label matches, which is where the dataset
+// keeps its own account of each dimension.
+const explain = (c: PrecedentCase, re: RegExp): string[] =>
+  c.similarityBreakdown.filter((b) => re.test(b.label)).map((b) => b.explanation);
+
+export interface OverviewSection {
+  label: string;
+  /** A paragraph, where the dataset holds one. */
+  body?: string;
+  /** Single-value dimensions, rendered as label/value rather than bullets. */
+  facts: { label: string; value: string }[];
+  items: string[];
+  /** True when the dataset carries nothing for this dimension. */
+  empty: boolean;
+}
+
+const section = (
+  label: string,
+  items: string[],
+  body?: string,
+  facts: { label: string; value: string }[] = [],
+): OverviewSection => ({
+  label,
+  body,
+  facts,
+  items,
+  empty: items.length === 0 && facts.length === 0 && !body,
+});
+
+export function caseOverview(c: PrecedentCase): OverviewSection[] {
+  const violation = c.filterValues.violation;
+  const statute = c.filterValues.legalStatute;
+  const injury = c.filterValues.injuryType;
+  const severity = c.filterValues.severity;
+
+  const liability = [
+    ...explain(c, /liability/i),
+    ...(isRecorded(violation) ? [`Conduct at issue: ${violation}`] : []),
+  ];
+
+  // The dataset does not separate negligence from liability, so this reports
+  // the conduct it does record rather than inferring a distinct finding.
+  const negligence = [
+    ...c.tags.filter((t) => /violation|fault|failure|yield|delay|breach|negligen/i.test(t)),
+    ...explain(c, /case context/i),
+  ];
+
+  const violations = [
+    ...(isRecorded(violation) ? [violation] : []),
+    ...(isRecorded(statute) && statute !== violation ? [statute] : []),
+  ];
+
+  const injuryFacts = [
+    ...(isRecorded(injury) ? [{ label: "Injury", value: injury }] : []),
+    ...(isRecorded(severity) ? [{ label: "Severity", value: severity }] : []),
+  ];
+  const injuries = explain(c, /injury|impact/i);
+
+  return [
+    section("Case Summary", [], c.summary),
+    section("Liability", Array.from(new Set(liability))),
+    section("Negligence", Array.from(new Set(negligence))),
+    section("Violations", Array.from(new Set(violations))),
+    section("Injuries & Damages", Array.from(new Set(injuries)), undefined, injuryFacts),
+  ];
+}
+
+export const OVERVIEW_UNRECORDED = UNRECORDED;
+
+// ── One precedent against this case ───────────────────────────────────────────
+// Only dimensions the record carries on both sides appear. A row is never
+// invented to fill the table out, and where this case has no counterpart the
+// dimension is left off rather than guessed at.
+
+export interface CurrentCaseProfile {
+  severity: string;
+  caseType: string;
+  jurisdiction: string;
+  evidenceStrength: string;
+  docCount: number;
+  /** This case's own estimate for the factor, for the settlement row. */
+  estimate: number;
+}
+
+export interface MapRow { attribute: string; precedent: string; current: string; aligned: boolean }
+
+const sameish = (a: string, b: string) => {
+  const na = a.toLowerCase(), nb = b.toLowerCase();
+  return na === nb || na.includes(nb) || nb.includes(na);
+};
+
+export function mapToCurrentCase(c: PrecedentCase, current: CurrentCaseProfile): MapRow[] {
+  const rows: MapRow[] = [];
+  const add = (attribute: string, precedent: string | undefined, cur: string) => {
+    if (!isRecorded(precedent)) return;
+    rows.push({ attribute, precedent, current: cur, aligned: sameish(precedent, cur) });
+  };
+  add("Severity", c.filterValues.severity, current.severity);
+  add("Case type", c.filterValues.caseType, current.caseType);
+  add("Jurisdiction", c.filterValues.jurisdiction, current.jurisdiction);
+  add("Conduct at issue", c.filterValues.violation, "Signal violation by a commercial vehicle");
+  return rows;
+}
+
+// The sentence that says why this precedent's number matters here, built from
+// the dimensions that actually line up and where the settlement sits.
+export function mappingNote(c: PrecedentCase, current: CurrentCaseProfile, s: PrecedentSummary): string {
+  const rows = mapToCurrentCase(c, current);
+  const aligned = rows.filter((r) => r.aligned).map((r) => r.attribute.toLowerCase());
+  const where = c.amount >= s.highest ? "the upper end of"
+    : c.amount <= s.lowest ? "the lower end of"
+    : "the middle of";
+  const shared = aligned.length === 0
+    ? "The recorded dimensions differ from this case"
+    : `The two align on ${aligned.join(", ")}`;
+  return `${shared}. Its ${money(c.amount)} settlement therefore supports positioning this factor toward ${where} its recommended range.`;
+}
+
+// ── Why a settlement came out where it did ────────────────────────────────────
+// The contributing factors the dataset records against the case, and the
+// dataset's own account of why it matters here.
+
+export interface SettlementContext {
+  amount: number;
+  factors: string[];
+  why: string;
+}
+
+export function settlementContext(c: PrecedentCase, s: PrecedentSummary): SettlementContext {
+  return {
+    amount: c.amount,
+    factors: Array.from(new Set([
+      ...c.tags,
+      ...(isRecorded(c.filterValues.severity) ? [`${c.filterValues.severity} severity`] : []),
+    ])),
+    why: `${c.whyThisMatters} ${settlementInfluence(c.amount, s)}`,
+  };
+}
+
+const money = (n: number) => "$" + Math.round(n).toLocaleString("en-US");
+
+// ── Asking about one precedent ────────────────────────────────────────────────
+// A question is answered from that case's own record and nothing else, so the
+// chat cannot drift onto the current case. Where the record does not cover the
+// question it says so rather than answering from somewhere else.
+
+export function answerAboutPrecedent(
+  question: string,
+  c: PrecedentCase,
+  s: PrecedentSummary,
+): { headline: string; points: string[]; caveat: string } {
+  const q = question.toLowerCase();
+  const caveat = `Answered from the record on ${c.caseName} only.`;
+
+  if (/settle|amount|value|worth|how much|why.*high|why.*low/.test(q)) {
+    const ctx = settlementContext(c, s);
+    return {
+      headline: `${c.caseName} settled at ${money(c.amount)}.`,
+      points: [...ctx.factors.map((f) => `Recorded factor: ${f}`), settlementInfluence(c.amount, s)],
+      caveat,
+    };
+  }
+  if (/liabilit|fault|defend|who was/.test(q)) {
+    const items = caseOverview(c).find((o) => o.label === "Liability")!;
+    return {
+      headline: items.empty ? `No liability finding is recorded for ${c.caseName}.` : `What the record holds on liability in ${c.caseName}.`,
+      points: items.items,
+      caveat,
+    };
+  }
+  if (/injur|damage|harm|medical|treatment/.test(q)) {
+    const items = caseOverview(c).find((o) => o.label === "Injuries & Damages")!;
+    return {
+      headline: items.empty ? `No injury detail is recorded for ${c.caseName}.` : `What the record holds on injuries in ${c.caseName}.`,
+      points: items.items,
+      caveat,
+    };
+  }
+  if (/negligen|conduct|breach/.test(q)) {
+    const items = caseOverview(c).find((o) => o.label === "Negligence")!;
+    return {
+      headline: items.empty ? `The record does not separate a negligence finding for ${c.caseName}.` : `What the record holds on the conduct in ${c.caseName}.`,
+      points: items.items,
+      caveat,
+    };
+  }
+  if (/violation|statute|regulat/.test(q)) {
+    const items = caseOverview(c).find((o) => o.label === "Violations")!;
+    return {
+      headline: items.empty ? `No violation is recorded for ${c.caseName}.` : `Violations recorded in ${c.caseName}.`,
+      points: items.items,
+      caveat,
+    };
+  }
+  if (/match|similar|compar|relevan|why.*(pick|select|chosen)/.test(q)) {
+    return {
+      headline: `${c.caseName} is recorded as a ${c.matchScore}% match.`,
+      points: whyItMatches(c, 6),
+      caveat,
+    };
+  }
+  if (/jurisdiction|venue|court|where/.test(q)) {
+    const j = c.filterValues.jurisdiction;
+    return {
+      headline: isRecorded(j) ? `${c.caseName} is recorded in ${j}.` : `No jurisdiction is recorded for ${c.caseName}.`,
+      points: [],
+      caveat,
+    };
+  }
+  if (/evidence|document|support|proof/.test(q)) {
+    return {
+      headline: `The record on ${c.caseName} carries its similarity breakdown rather than an evidence list.`,
+      points: c.similarityBreakdown.map((b) => `${b.label}: ${b.explanation}`),
+      caveat,
+    };
+  }
+  return {
+    headline: `Here is what the record holds on ${c.caseName}.`,
+    points: [c.summary, ...whyItMatches(c, 3)],
+    caveat: `${caveat} Ask about the settlement, liability, injuries, negligence, violations, jurisdiction or why it matches.`,
+  };
+}
