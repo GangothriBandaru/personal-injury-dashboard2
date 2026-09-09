@@ -5,6 +5,7 @@ import type { ChronCandidate, ChronEdit } from "./chronologyActions";
 import type {
     DamageAddProposal, DamageDeleteProposal, DamageEditProposal, DamageMoveProposal, DamageSuggestion,
 } from "./damagesActions";
+import { initialConnections, type ResearchAnswer, type SourceConnection, type SourceId } from "./legalSources";
 
 // ── Assistant store ───────────────────────────────────────────────────────────
 // ONE assistant. The launcher lives in the top bar and the panel lives in the
@@ -63,6 +64,10 @@ export interface Message {
   damageSuggest?: { suggestion: DamageSuggestion; state: "open" | "reviewing" | "dismissed" }[];
   /** Provenance footer on a confirmation — "AI Modified · Damages Analysis". */
   stamp?: { provenance: string; where: string };
+  /** Research read from outside platforms, with its attribution. */
+  research?: ResearchAnswer;
+  /** The platforms this turn used, for the Legal Research marker. */
+  researchSources?: string[];
 }
 
 export type DamageState = "pending" | "applied" | "cancelled";
@@ -98,6 +103,12 @@ interface Value {
 
   selectedDocs: string[];
   setSelectedDocs: (d: string[]) => void;
+
+  /** Legal research platforms: their connection state and which are armed for
+   *  this chat. Deliberately separate from `selectedDocs`, which is the case's
+   *  own evidence. No credential is held here. */
+  connections: Record<SourceId, SourceConnection>;
+  setConnections: React.Dispatch<React.SetStateAction<Record<SourceId, SourceConnection>>>;
 
   conversations: Conversation[];
   activeId: string;
@@ -139,6 +150,7 @@ export function AssistantProvider({
   const [context, setContext] = useState<ContextSel>({ kind: "current" });
   const [workWith, setWorkWith] = useState<WorkStage | null>(null);
   const [selectedDocs, setSelectedDocs] = useState<string[]>([]);
+  const [connections, setConnections] = useState<Record<SourceId, SourceConnection>>(initialConnections);
   const [conversations, setConversations] = useState<Conversation[]>([blank("Current Stage")]);
   const [activeId, setActiveId] = useState<string>("");
 
@@ -158,6 +170,7 @@ export function AssistantProvider({
     open, setOpen, expanded, setExpanded, width, setWidth,
     context, setContext, workWith, setWorkWith,
     selectedDocs, setSelectedDocs,
+    connections, setConnections,
     conversations, activeId, setActiveId, setConversations,
     newConversation: (contextLabel) => {
       const c = blank(contextLabel);

@@ -7,6 +7,20 @@
 // The verdicts are passed in rather than imported, so this stays a pure module
 // the stage can call without a dependency cycle.
 
+// The clinical picture a precedent can carry. Optional because the comparable
+// verdicts on file do not record it yet; a case that does carries it here and
+// the card renders it directly rather than inferring it from prose.
+export interface PrecedentClinical {
+  /** Emergency care, surgery, hospitalisation, rehabilitation, ongoing care… */
+  treatment?: string[];
+  /** Mobility, independence, cognition, chronic pain, capacity to work… */
+  impact?: string[];
+  /** Weeks, months, years, ongoing, permanent. */
+  duration?: string[];
+  /** Neurologist, spine surgeon, pain-management specialist, therapist… */
+  providers?: string[];
+}
+
 export interface PrecedentCase {
   caseName: string;
   amount: number;
@@ -17,6 +31,8 @@ export interface PrecedentCase {
   whyThisMatters: string;
   similarityBreakdown: { label: string; contribution: number; explanation: string }[];
   filterValues: Record<string, string>;
+  /** Recorded clinical detail, where the case carries any. */
+  clinical?: PrecedentClinical;
 }
 
 export type Relevance = "high" | "moderate" | "low";
@@ -204,6 +220,75 @@ const section = (
   empty: items.length === 0 && facts.length === 0 && !body,
 });
 
+// ── The clinical picture ──────────────────────────────────────────────────────
+// Treatment, impact, duration and the providers involved, read out of the text
+// the dataset records for a case. A term is reported because it appears in that
+// case's own record — nothing is inferred from the injury type, and a dimension
+// the record is silent on is reported as silent.
+//
+// The comparable verdicts carry a summary, a similarity breakdown and filter
+// values. They do not carry a treatment plan or a treating physician, so those
+// dimensions will read as unavailable until the dataset carries them.
+
+const CLINICAL_TERMS: Record<string, { label: string; test: RegExp }[]> = {
+  "Treatment Profile": [
+    { label: "Surgical intervention", test: /surger|surgical|operative/ },
+    { label: "Physical therapy", test: /physical therapy|physiotherapy/ },
+    { label: "Rehabilitation programme", test: /rehabilitat/ },
+    { label: "Pain management", test: /pain[- ]manage/ },
+    { label: "Ongoing care", test: /ongoing care|continuing care/ },
+    { label: "Hospitalisation", test: /hospitali[sz]|admission/ },
+    { label: "Medication regimen", test: /medication|prescri/ },
+  ],
+  "Injury Impact": [
+    { label: "Permanent impairment", test: /permanent impairment|permanently impair/ },
+    { label: "Functional impairment", test: /impair|functional/ },
+    { label: "Chronic pain", test: /chronic pain/ },
+    { label: "Reduced mobility", test: /mobility|range of motion/ },
+    { label: "Cognitive effects", test: /cognitive|neurolog/ },
+    { label: "Emotional or psychological effects", test: /emotional|psycholog|distress/ },
+    { label: "Impact on daily activities", test: /daily activit|activities of daily|independence/ },
+  ],
+  Duration: [
+    { label: "Permanent", test: /permanen/ },
+    { label: "Long-term", test: /long-term|lasting/ },
+    { label: "Ongoing at the time of settlement", test: /ongoing|continuing/ },
+    { label: "Prolonged", test: /prolonged|extended/ },
+    { label: "Temporary", test: /temporary|resolved/ },
+  ],
+  "Treating Providers": [
+    { label: "Neurologist", test: /neurologist/ },
+    { label: "Spine or orthopaedic surgeon", test: /spine surgeon|orthopa?edic|surgeon/ },
+    { label: "Pain-management specialist", test: /pain[- ]management specialist/ },
+    { label: "Physical therapist", test: /physical therapist|physiotherapist/ },
+    { label: "Psychologist or psychiatrist", test: /psycholog|psychiatr/ },
+    { label: "Treating physician", test: /treating physician|physician/ },
+  ],
+};
+
+export const CLINICAL_UNAVAILABLE = "Not available in case record.";
+
+// Each clinical dimension for one case. A case that records the dimension is
+// read directly; one that does not is read from the language its record does
+// carry; one that carries neither is reported as silent. Nothing is filled in
+// from the injury type or from what a case like this usually involves.
+const CLINICAL_FIELD: Record<string, keyof PrecedentClinical> = {
+  "Treatment Profile": "treatment",
+  "Injury Impact": "impact",
+  Duration: "duration",
+  "Treating Providers": "providers",
+};
+
+export function clinicalProfile(c: PrecedentCase): OverviewSection[] {
+  const text = searchable(c);
+  return Object.entries(CLINICAL_TERMS).map(([label, terms]) => {
+    const recorded = c.clinical?.[CLINICAL_FIELD[label]];
+    if (recorded && recorded.length > 0) return section(label, [...recorded]);
+    const derived = terms.filter((t) => t.test.test(text)).map((t) => t.label);
+    return section(label, derived);
+  });
+}
+
 export function caseOverview(c: PrecedentCase): OverviewSection[] {
   const violation = c.filterValues.violation;
   const statute = c.filterValues.legalStatute;
@@ -239,6 +324,7 @@ export function caseOverview(c: PrecedentCase): OverviewSection[] {
     section("Negligence", Array.from(new Set(negligence))),
     section("Violations", Array.from(new Set(violations))),
     section("Injuries & Damages", Array.from(new Set(injuries)), undefined, injuryFacts),
+    ...clinicalProfile(c),
   ];
 }
 

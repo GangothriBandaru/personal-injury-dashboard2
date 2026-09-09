@@ -28,7 +28,12 @@ import {
     useDamagesOptional,
     type DamageItem, type FieldChange,
 } from "../damages/DamagesContext";
-import { CHRONOLOGY_TITLES, CURRENT_USER as CURRENT_ATTORNEY, documentAmount } from "../workspace/WorkspaceTabs";
+import { CHRONOLOGY_TITLES, CURRENT_USER as CURRENT_ATTORNEY, documentAmount, COMPARABLE_VERDICTS } from "../workspace/WorkspaceTabs";
+import {
+  LEGAL_SOURCES, sourceById, isResearchQuery, research,
+  type LegalSource, type SourceId,
+} from "./legalSources";
+import { LegalSourcesPanel, ConnectDialog, ResearchBlock, ResearchIndicator } from "./LegalResearchPanel";
 import {
     DRAWER_DEFAULT,
     DRAWER_MIN,
@@ -335,6 +340,8 @@ function Thread({
                   onDismiss={() => damage.onDismissSuggestion(m.id, i)}
                 />
               ))}
+              {m.research && <ResearchBlock answer={m.research} />}
+              {m.researchSources && <ResearchIndicator names={m.researchSources} />}
               {/* Provenance footer on a confirmation — how the record changed
                   and where, in the same words the stage uses. */}
               {m.stamp && (
@@ -915,6 +922,7 @@ export function AssistantPanel() {
   const {
     location, documents, findings, open, setOpen, expanded, setExpanded, width, setWidth,
     context, setContext, workWith, setWorkWith, selectedDocs, setSelectedDocs,
+    connections, setConnections,
     conversations, activeId, setActiveId, setConversations, newConversation,
   } = useAssistant();
 
@@ -924,6 +932,9 @@ export function AssistantPanel() {
   const [showHistory, setShowHistory] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [docsOpen, setDocsOpen] = useState(false);
+  // Which platform's sign-in is being shown. The flow hands off to the platform;
+  // nothing here ever holds a credential.
+  const [connecting, setConnecting] = useState<LegalSource | null>(null);
   const [dragging, setDragging] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -1292,6 +1303,43 @@ export function AssistantPanel() {
       const offer = damagesReachable && damages && /\b(damage|damages|expense|expenses|cost|costs|missing|gap|gaps|complete|outstanding|overlook)\b/i.test(text)
         ? missingDamages(damages.items).slice(0, 1)
         : [];
+      // A research question goes to the connected platforms. The results that
+      // can be shown here come from the case's own precedent record and say so;
+      // a platform without a wired adapter hands over a search link rather than
+      // appearing to have answered.
+      if (isResearchQuery(text)) {
+        const fromCaseFile = COMPARABLE_VERDICTS.map((v) => ({
+          sourceId: "case-file" as const,
+          sourceName: "Case file · comparable verdicts",
+          title: v.caseName,
+          match: v.matchScore,
+          outcome: "$" + v.amount.toLocaleString("en-US"),
+          reasons: v.similarityBreakdown.slice(0, 4).map((b) => b.explanation),
+        }));
+        const found = research(text, connections, fromCaseFile);
+        const used = [
+          ...found.handoffs.map((h) => h.sourceName),
+          ...(found.results.length > 0 ? ["Case file"] : []),
+        ];
+        push({
+          id: `a-${id}`, role: "assistant", context: ctxLabel,
+          answer: {
+            headline: found.handoffs.length > 0
+              ? `Here is what the case file holds, and the connected platforms to continue on.`
+              : `Here is what the case file holds on that.`,
+            points: [],
+            citations: [],
+            caveat: found.noBackend
+              ? "No platform API adapter is wired up in this build, so nothing below is attributed to an external platform."
+              : undefined,
+          },
+          research: found,
+          researchSources: used,
+        });
+        setThinking(false);
+        return;
+      }
+
       push({
         id: `a-${id}`, role: "assistant", context: ctxLabel,
         answer: answer(text, effectiveScope(context), location, globalSource(context)),
@@ -1511,6 +1559,39 @@ export function AssistantPanel() {
     onDismissSuggestion: dismissSuggestion,
   };
 
+  // ── Legal research sources ────────────────────────────────────────────────
+  // Connecting hands off to the platform. Until a backend adapter exists the
+  // authorisation is completed locally and only a status is stored — never a
+  // key, a token or a credential.
+  const setConnection = (id: SourceId, patch: Partial<(typeof connections)[SourceId]>) =>
+    setConnections((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+
+  const beginConnect = (id: SourceId) => setConnecting(sourceById(id));
+
+  const authorise = (source: LegalSource) => {
+    setConnecting(null);
+    setConnection(source.id, { status: "connecting", message: undefined });
+    // The platform's own sign-in opens in its own tab, as the real flow would.
+    window.open(source.externalSearch(""), "_blank", "noopener");
+    window.setTimeout(() => {
+      setConnection(source.id, {
+        status: "connected",
+        account: `${CURRENT_ATTORNEY} · ${source.name}`,
+        connectedAt: new Date().toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }),
+        enabled: true,
+        message: undefined,
+      });
+    }, 900);
+  };
+
+  const disconnect = (id: SourceId) =>
+    setConnection(id, { status: "disconnected", enabled: false, account: undefined, connectedAt: undefined, message: undefined });
+
+  const toggleSource = (id: SourceId) =>
+    setConnections((prev) => ({ ...prev, [id]: { ...prev[id], enabled: !prev[id].enabled } }));
+
+  const retrySource = (id: SourceId) => beginConnect(id);
+
   const runAction = (act: DocActionId) => {
     const id = Math.round(performance.now());
     const label = DOC_ACTIONS.find((d) => d.id === act)!.label;
@@ -1648,8 +1729,25 @@ export function AssistantPanel() {
           onAction={runAction}
         />
       )}
+      {/* External research platforms. Kept apart from Documents above, which is
+          the case's own evidence. */}
+      <LegalSourcesPanel
+        connections={connections}
+        onConnect={beginConnect}
+        onDisconnect={disconnect}
+        onToggle={toggleSource}
+        onRetry={retrySource}
+      />
     </div>
   );
+
+  const connectDialog = connecting ? (
+    <ConnectDialog
+      source={connecting}
+      onCancel={() => setConnecting(null)}
+      onAuthorise={() => authorise(connecting)}
+    />
+  ) : null;
 
   const conversationPane = (
     <>
@@ -1726,6 +1824,7 @@ export function AssistantPanel() {
           />
         ) : conversationPane
       )}
+      {connectDialog}
     </aside>
   );
 }

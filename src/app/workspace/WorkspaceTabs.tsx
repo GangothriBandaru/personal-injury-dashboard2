@@ -28,6 +28,11 @@ import {
   type PillarItem, type PillarAudit,
 } from "./PillarsContext";
 import {
+  useViolationsOptional, attorneyViolationActor, VIOLATION_SEED, VIOLATION_SEVERITIES,
+  VIOLATION_PROVENANCE_LABEL, VIOLATION_ACTION_LABEL,
+  type ViolationItem, type ViolationAudit, type ViolationSeverity,
+} from "./ViolationsContext";
+import {
   useDamagesOptional, attorneyActor, formatDamageUSD, ECONOMIC_CATEGORIES,
   DAMAGE_SEED, DAMAGE_PROVENANCE_LABEL, DAMAGE_ACTION_LABEL, DAMAGE_FIELD_LABEL, BUCKET_LABEL,
   type DamageAudit, type DamageBucket, type DamageItem, type DamageProvenance,
@@ -4535,8 +4540,14 @@ function PillarField({
 // chip detaches the document from this pillar; the file stays on the case and
 // can be cited by another pillar.
 function EvidenceEditor({
-  docs, onChange, available,
-}: { docs: string[]; onChange: (d: string[]) => void; available: string[] }) {
+  docs, onChange, available, subject = "pillar",
+}: {
+  docs: string[];
+  onChange: (d: string[]) => void;
+  available: string[];
+  /** What the record is called, so the wording fits whichever stage uses it. */
+  subject?: string;
+}) {
   const [picking, setPicking] = useState(false);
   const [query, setQuery] = useState("");
   const [chosen, setChosen] = useState<string[]>([]);
@@ -4554,7 +4565,7 @@ function EvidenceEditor({
     <div>
       <label className="eyebrow block mb-1">Supporting Evidence</label>
       {docs.length === 0 && !picking && (
-        <p className="secondary-text mb-2">No documents are cited by this pillar yet.</p>
+        <p className="secondary-text mb-2">No documents are cited by this {subject} yet.</p>
       )}
       <div className="flex flex-wrap gap-1.5">
         {docs.map((d) => (
@@ -4563,8 +4574,8 @@ function EvidenceEditor({
             <span className="truncate max-w-[180px]">{d}</span>
             <button
               onClick={() => onChange(docs.filter((x) => x !== d))}
-              title={`Remove ${d} from this pillar`}
-              aria-label={`Remove ${d} from this pillar`}
+              title={`Remove ${d} from this ${subject}`}
+              aria-label={`Remove ${d} from this ${subject}`}
               className="p-0.5 rounded text-[#8A98A3] hover:bg-[#FEF4F3] hover:text-[#B42318] transition-colors"
             >
               <X className="w-3.5 h-3.5" strokeWidth={2} />
@@ -4625,7 +4636,7 @@ function EvidenceEditor({
         </div>
       )}
       <p className="text-[11px] text-[#8A98A3] mt-1.5">
-        Removing a document releases this pillar's citation. The document stays on the case file.
+        Removing a document releases this {subject}'s citation. The document stays on the case file.
       </p>
     </div>
   );
@@ -5153,96 +5164,251 @@ const LEGAL_FRAMEWORK = {
   statute: "Illinois Vehicle Code (625 ILCS 5)",
 };
 
-export type ViolationCard = {
-  id: string;
-  title: string;
-  severity: "Critical" | "High" | "Medium" | "Low";
-  description: string;
-  jurisdiction: string;
-  statute: string;
-  aiSummary: string;
-  whyApplied: string;
-  confidence: number;
-  evidenceStrength: "Strong" | "Moderate" | "Limited";
-  similar: { name: string; reasonConsidered: string; whyNot: string }[];
-  evidence: string[];
-};
-
-export const VIOLATION_CARDS: ViolationCard[] = [
-  {
-    id: "failure-to-yield",
-    title: "Failure to Yield Right-of-Way",
-    severity: "Critical",
-    description: "The defendant's commercial vehicle failed to yield to the plaintiff, who lawfully held the right-of-way at the intersection.",
-    jurisdiction: "Cook County, Illinois",
-    statute: "625 ILCS 5/11-901 — Vehicle Approaching or Entering Intersection",
-    aiSummary: "LECO matched the verified intersection-collision facts to Illinois' right-of-way statute, finding the defendant entered against the plaintiff's established right-of-way.",
-    whyApplied: "The responding officer's narrative and the scene reconstruction place the defendant entering the intersection while the plaintiff held the right-of-way — the core element of an 11-901 violation.",
-    confidence: 98,
-    evidenceStrength: "Strong",
-    similar: [
-      { name: "625 ILCS 5/11-902 — Left Turns", reasonConsidered: "Also governs intersection right-of-way duties.", whyNot: "No turning maneuver was involved; the collision occurred on a straight-through path." },
-      { name: "625 ILCS 5/11-1201 — Yielding at Stop Signs", reasonConsidered: "Imposes a comparable yield duty at intersections.", whyNot: "The intersection was signal-controlled, not sign-controlled, so the stop-sign statute does not apply." },
-    ],
-    evidence: ["Police_Report.pdf", "Scene_Reconstruction.pdf", "Witness_Statement_A.pdf", "Traffic_Camera_Still.png", "Officer_Narrative.pdf"],
-  },
-  {
-    id: "red-light",
-    title: "Red-Light Signal Violation",
-    severity: "Critical",
-    description: "The commercial vehicle entered the intersection against a red signal at the moment of impact.",
-    jurisdiction: "Cook County, Illinois",
-    statute: "625 ILCS 5/11-306 — Obedience to Traffic-Control Signals",
-    aiSummary: "Signal-timing evidence and witness corroboration align with Illinois' traffic-control-signal statute, supporting a red-light entry.",
-    whyApplied: "Signal-timing data and a corroborating witness confirm the light was red against the defendant when the vehicle entered the intersection.",
-    confidence: 96,
-    evidenceStrength: "Strong",
-    similar: [
-      { name: "625 ILCS 5/11-305 — Authority to Place Signals", reasonConsidered: "Part of the same signal-control article.", whyNot: "Addresses an agency's authority to install signals, not a driver's duty to obey them." },
-      { name: "625 ILCS 5/11-1301 — Stopping Prohibited", reasonConsidered: "Also regulates conduct at intersections.", whyNot: "Concerns standing and parking, not signal compliance." },
-    ],
-    evidence: ["Signal_Timing_Log.pdf", "Dashcam_Footage.mp4", "Witness_Statement_B.pdf", "Intersection_Diagram.pdf"],
-  },
-  {
-    id: "excessive-speed",
-    title: "Excessive Speed",
-    severity: "High",
-    description: "Reconstruction places the vehicle above the posted speed limit at the moment of impact.",
-    jurisdiction: "Cook County, Illinois",
-    statute: "625 ILCS 5/11-601 — Speed Restrictions (Reasonable and Proper)",
-    aiSummary: "Reconstruction metrics exceed the posted limit, mapping the facts to Illinois' reasonable-and-proper speed statute.",
-    whyApplied: "Crush-depth and skid analysis yield an impact speed exceeding the posted limit, satisfying the unreasonable-speed element of 11-601.",
-    confidence: 88,
-    evidenceStrength: "Strong",
-    similar: [
-      { name: "625 ILCS 5/11-601.5 — Aggravated Speeding", reasonConsidered: "Directly addresses excessive speed.", whyNot: "The estimated speed did not reach the 26-mph-over threshold the aggravated charge requires." },
-      { name: "625 ILCS 5/11-605 — School Zone Speed Limits", reasonConsidered: "Another speed-restriction statute.", whyNot: "The incident did not occur within a posted school zone." },
-    ],
-    evidence: ["Scene_Reconstruction.pdf", "Skid_Analysis.pdf", "EDR_Download.pdf"],
-  },
-  {
-    id: "carrier-negligence",
-    title: "Commercial Carrier Negligence",
-    severity: "Medium",
-    description: "The operating motor carrier failed to meet its federal safety-management duties for the driver and vehicle.",
-    jurisdiction: "Federal — FMCSA / 49 CFR",
-    statute: "49 CFR § 392 — Driving of Commercial Motor Vehicles",
-    aiSummary: "Confirmed carrier control brings the operation under federal safe-driving duties, with the underlying moving violations evidencing a breach.",
-    whyApplied: "Confirmed commercial coverage and carrier control bring the operation under FMCSA duties; the underlying moving violations evidence a breach of safe-operation obligations.",
-    confidence: 79,
-    evidenceStrength: "Moderate",
-    similar: [
-      { name: "49 CFR § 395 — Hours of Service", reasonConsidered: "A primary FMCSA driver-safety rule.", whyNot: "No logbook or fatigue evidence currently supports an hours-of-service theory." },
-      { name: "49 CFR § 396 — Inspection & Maintenance", reasonConsidered: "Governs carrier vehicle-safety duties.", whyNot: "No mechanical-defect evidence has been identified to date." },
-    ],
-    evidence: ["Insurance_Policy.pdf", "Carrier_Records.pdf", "Police_Report.pdf", "FMCSA_Profile.pdf"],
-  },
-];
+// The violation cards live in the violations store, which owns the record
+// and the operations over it. Re-exported here because the rest of the app
+// has always read them from this module.
+export type { ViolationCard } from "./ViolationsContext";
+export const VIOLATION_CARDS = VIOLATION_SEED;
 
 // Toggle a card id within a Set-based open/closed state.
 type SetState = (updater: (prev: Set<string>) => Set<string>) => void;
 const toggleId = (setter: SetState, id: string) =>
   setter((prev) => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+
+// ── Attorney editing of the violations ───────────────────────────────────────
+// The same pattern the negligence pillars use: one Edit action per card, a form
+// that replaces the card in place, and the secondary actions — delete, history —
+// kept inside that form so the stage stays a reading surface.
+
+interface ViolationDraft {
+  title: string;
+  description: string;
+  severity: ViolationSeverity;
+  statute: string;
+  jurisdiction: string;
+  evidence: string[];
+}
+
+const violationDraftOf = (v: ViolationItem): ViolationDraft => ({
+  title: v.title,
+  description: v.description,
+  severity: v.severity,
+  statute: v.statute,
+  jurisdiction: v.jurisdiction,
+  evidence: [...v.evidence],
+});
+
+const blankViolationDraft = (jurisdiction: string): ViolationDraft => ({
+  title: "", description: "", severity: "Medium", statute: "", jurisdiction, evidence: [],
+});
+
+// The violation form, used both for editing an existing violation and adding a
+// new one. Same fields either way, so the two cannot drift apart.
+function ViolationForm({
+  title, draft, setDraft, onCancel, onSave, saveLabel, available, statutes, onDelete, onHistory,
+}: {
+  title: string;
+  draft: ViolationDraft;
+  setDraft: (d: ViolationDraft) => void;
+  onCancel: () => void;
+  onSave: () => void;
+  saveLabel: string;
+  /** Every document on the case, for the evidence picker. */
+  available: string[];
+  /** Every statute the case already references. */
+  statutes: string[];
+  onDelete?: () => void;
+  onHistory?: () => void;
+}) {
+  const set = (k: "title" | "description" | "jurisdiction") => (v: string) => setDraft({ ...draft, [k]: v });
+  const valid = draft.title.trim().length > 0;
+  const field = "w-full rounded-lg border border-line bg-white px-2.5 py-1.5 text-sm text-ink focus:outline-none focus:border-brand transition-colors";
+  return (
+    <div className="border border-[#D6F2F7] rounded-xl bg-[#F6FDFF] p-5 flex flex-col gap-3">
+      <div className="eyebrow text-deep">{title}</div>
+
+      <PillarField label="Violation" value={draft.title} onChange={set("title")} placeholder="Enter violation title" />
+      <PillarField label="Description" value={draft.description} onChange={set("description")} rows={3} placeholder="Describe the conduct at issue…" />
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label className="eyebrow block mb-1">Severity</label>
+          <select
+            value={draft.severity}
+            onChange={(e) => setDraft({ ...draft, severity: e.target.value as ViolationSeverity })}
+            className={field}
+          >
+            {VIOLATION_SEVERITIES.map((sv) => <option key={sv} value={sv}>{sv}</option>)}
+          </select>
+        </div>
+        <PillarField label="Jurisdiction" value={draft.jurisdiction} onChange={set("jurisdiction")} />
+      </div>
+
+      {/* The statutes the case already cites — its own and the alternatives the
+          AI considered — rather than a list invented for the picker. */}
+      <div>
+        <label className="eyebrow block mb-1">Applied Legal Statute</label>
+        <select
+          value={statutes.includes(draft.statute) ? draft.statute : "__custom"}
+          onChange={(e) => setDraft({ ...draft, statute: e.target.value === "__custom" ? "" : e.target.value })}
+          className={`${field} mb-1.5`}
+        >
+          {statutes.map((st) => <option key={st} value={st}>{st}</option>)}
+          <option value="__custom">Other statute…</option>
+        </select>
+        <input
+          value={draft.statute}
+          onChange={(e) => setDraft({ ...draft, statute: e.target.value })}
+          placeholder="625 ILCS 5/11-000 — Statute title"
+          className={field}
+        />
+        <p className="text-[11px] text-[#8A98A3] mt-1">
+          Choose a statute the case already cites, or enter another. Keep the code — title format.
+        </p>
+      </div>
+
+      <EvidenceEditor
+        docs={draft.evidence}
+        onChange={(evidence) => setDraft({ ...draft, evidence })}
+        available={available}
+        subject="violation"
+      />
+
+      <div className="flex items-center justify-between gap-3 flex-wrap pt-1">
+        <div className="flex items-center gap-3">
+          {onHistory && (
+            <button onClick={onHistory} className="inline-flex items-center gap-1.5 text-xs font-semibold text-deep hover:text-ink transition-colors">
+              <History className="w-3.5 h-3.5" strokeWidth={1.75} /> History
+            </button>
+          )}
+          {onDelete && (
+            <button onClick={onDelete} className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#B42318] hover:text-[#96200F] transition-colors">
+              <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} /> Delete Violation
+            </button>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={onCancel} className="btn btn-secondary px-3 py-2 text-sm">Cancel</button>
+          <button onClick={onSave} disabled={!valid} className="btn btn-primary px-3 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+            {saveLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Removing a violation changes the case analysis, so it is always confirmed and
+// always says what happens to the evidence behind it.
+function DeleteViolationDialog({
+  item, onCancel, onConfirm,
+}: { item: ViolationItem; onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <>
+      <div className="fixed inset-0 bg-ink/40 z-[80]" onClick={onCancel} />
+      <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[80] w-[440px] max-w-[92vw] rounded-2xl border border-line bg-white shadow-xl p-5">
+        <div className="flex items-center gap-2 mb-2.5">
+          <AlertTriangle className="w-4 h-4 text-[#B42318] shrink-0" strokeWidth={1.75} />
+          <h3 className="card-title">Delete violation?</h3>
+        </div>
+        <p className="body-text leading-relaxed">
+          Are you sure you want to remove &ldquo;{item.title}&rdquo; from this case? This will remove the
+          violation from the current case analysis.
+        </p>
+        {item.evidence.length > 0 && (
+          <div className="rounded-xl border border-[#FDE6C8] bg-[#FFF7ED] px-3.5 py-3 mt-3">
+            <div className="flex items-center gap-1.5 mb-1">
+              <FileText className="w-3.5 h-3.5 text-[#B45309] shrink-0" strokeWidth={1.75} />
+              <span className="eyebrow text-[#B45309]">{item.evidence.length} supporting documents</span>
+            </div>
+            <p className="secondary-text">
+              The violation's citation of this evidence is released. The documents themselves stay in the case repository.
+            </p>
+          </div>
+        )}
+        <div className="flex items-center justify-end gap-2 mt-4">
+          <button onClick={onCancel} className="btn btn-secondary px-3 py-2 text-sm">Cancel</button>
+          <button
+            onClick={onConfirm}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold text-white bg-[#B42318] hover:bg-[#96200F] transition-colors"
+          >
+            <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} /> Delete Violation
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// The change history for one violation.
+function ViolationHistoryDrawer({
+  item, entries, onClose,
+}: { item: ViolationItem; entries: ViolationAudit[]; onClose: () => void }) {
+  const newestFirst = [...entries].reverse();
+  return (
+    <>
+      <div className="fixed inset-0 bg-ink/40 z-[70]" onClick={onClose} />
+      <div className="fixed top-0 right-0 h-full w-[460px] max-w-[92vw] bg-white shadow-xl z-[70] flex flex-col">
+        <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-line shrink-0">
+          <div className="min-w-0">
+            <div className="eyebrow mb-1">Violation History</div>
+            <h2 className="card-title">{item.title}</h2>
+            <div className="mono-ref mt-1">{item.severity} · {VIOLATION_PROVENANCE_LABEL[item.provenance]}</div>
+          </div>
+          <button onClick={onClose} title="Close" className="p-1.5 hover:bg-tint rounded-lg transition-colors shrink-0">
+            <X className="w-5 h-5 text-[#5B6B78]" strokeWidth={1.75} />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-5">
+          {newestFirst.length === 0 ? (
+            <p className="secondary-text">
+              No changes recorded. This violation is as the AI first cited it.
+            </p>
+          ) : (
+            <div className="relative">
+              {newestFirst.map((e, i) => (
+                <div key={e.id} className="relative flex gap-3 pb-6 last:pb-0">
+                  <div className="flex flex-col items-center shrink-0">
+                    <div className="w-2.5 h-2.5 rounded-full bg-white border-2 border-brand mt-1.5" />
+                    {i < newestFirst.length - 1 && <div className="w-px flex-1 bg-line mt-1.5" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-semibold text-ink">{VIOLATION_ACTION_LABEL[e.action]}</span>
+                      <span className="mono-ref">{e.at}</span>
+                    </div>
+                    <p className="text-xs text-[#8A98A3] mt-0.5">{e.changedBy}</p>
+                    {(e.action === "evidence-added" || e.action === "evidence-removed") && (
+                      <div className="rounded-xl border border-line mt-2 px-3.5 py-2 flex items-center gap-1.5">
+                        <span className={`text-sm font-semibold ${e.action === "evidence-added" ? "text-[#15803D]" : "text-[#B42318]"}`}>
+                          {e.action === "evidence-added" ? "+" : "−"}
+                        </span>
+                        <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+                        <span className="mono-ref text-ink">{e.next ?? e.previous}</span>
+                      </div>
+                    )}
+                    {e.previous !== undefined && e.next !== undefined && e.action !== "created" && e.action !== "deleted" && (
+                      <div className="rounded-xl border border-line divide-y divide-line mt-2">
+                        <div className="px-3.5 py-2">
+                          <div className="eyebrow mb-0.5">Previous</div>
+                          <p className="body-text leading-relaxed">{e.previous || "—"}</p>
+                        </div>
+                        <div className="px-3.5 py-2">
+                          <div className="eyebrow mb-0.5">New</div>
+                          <p className="body-text leading-relaxed font-medium">{e.next || "—"}</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
 
 export function LiabilityAnalysisTab({ goTo, documents }: TabProps) {
   const [statuteOpen, setStatuteOpen] = useState<Set<string>>(new Set());
@@ -5255,9 +5421,13 @@ export function LiabilityAnalysisTab({ goTo, documents }: TabProps) {
   const [wsIndex, setWsIndex] = useState(0);
   const [wsView, setWsView] = useState<"preview" | "insights">("preview");
   const docForFile = buildDocResolver(documents);
-  const violationDocSets = VIOLATION_CARDS.map((v) => v.evidence.map(docForFile));
-  const violationContexts = VIOLATION_CARDS.map((v) => ({ contextType: "Violation", reference: v.title }));
-  const violationInsights = VIOLATION_CARDS.map((v) => ({
+  // The violations, live. The cards, the workspace and the summary all read
+  // this one list, so an edit reaches them together.
+  const violationStore = useViolationsOptional();
+  const violations = violationStore?.violations ?? VIOLATION_SEED;
+  const violationDocSets = violations.map((v) => v.evidence.map(docForFile));
+  const violationContexts = violations.map((v) => ({ contextType: "Violation", reference: v.title }));
+  const violationInsights = violations.map((v) => ({
     summary: v.aiSummary,
     keyPoints: v.evidence.map((d) => `${d.replace(/_/g, " ").replace(/\.[a-z0-9]+$/i, "")} reviewed and verified.`),
     entities: [
@@ -5269,7 +5439,7 @@ export function LiabilityAnalysisTab({ goTo, documents }: TabProps) {
     confidence: { level: v.confidence >= 90 ? "High" : v.confidence >= 75 ? "Medium" : "Low", score: v.confidence },
   }));
   // Document Context Panel data for the preview rail (per violation).
-  const violationPanels = VIOLATION_CARDS.map((v) => ({
+  const violationPanels = violations.map((v) => ({
     summary: [
       { label: "Violation", value: v.title },
       { label: "Severity", value: v.severity },
@@ -5279,12 +5449,70 @@ export function LiabilityAnalysisTab({ goTo, documents }: TabProps) {
   }));
   const openViolation = (i: number, view: "preview" | "insights" = "preview") => { setWsIndex(i); setWsView(view); setWsOpen(true); };
 
-  const total = VIOLATION_CARDS.length;
+  const total = violations.length;
   const counts = {
-    Critical: VIOLATION_CARDS.filter((v) => v.severity === "Critical").length,
-    High: VIOLATION_CARDS.filter((v) => v.severity === "High").length,
-    Medium: VIOLATION_CARDS.filter((v) => v.severity === "Medium").length,
-    Low: VIOLATION_CARDS.filter((v) => v.severity === "Low").length,
+    Critical: violations.filter((v) => v.severity === "Critical").length,
+    High: violations.filter((v) => v.severity === "High").length,
+    Medium: violations.filter((v) => v.severity === "Medium").length,
+    Low: violations.filter((v) => v.severity === "Low").length,
+  };
+
+  // ── Attorney editing ─────────────────────────────────────────────────────
+  // Which card is in edit mode, which is pending deletion, and whether the add
+  // form is open. Every handler calls a store operation.
+  const [editingViolation, setEditingViolation] = useState<string | null>(null);
+  const [deletingViolation, setDeletingViolation] = useState<string | null>(null);
+  const [historyViolation, setHistoryViolation] = useState<string | null>(null);
+  const [addingViolation, setAddingViolation] = useState(false);
+  const [violationDraft, setViolationDraft] = useState<ViolationDraft>(blankViolationDraft(LEGAL_FRAMEWORK.venue));
+  const violationActor = attorneyViolationActor(CURRENT_USER);
+  const deletingViolationItem = violations.find((v) => v.id === deletingViolation) ?? null;
+  const historyViolationItem = violations.find((v) => v.id === historyViolation) ?? null;
+  // The pool the evidence picker offers: the case's documents, plus anything a
+  // violation already cites, so a citation is never dropped for being unlisted.
+  const violationDocNames = Array.from(
+    new Set([...documents.map((d) => d.name), ...violations.flatMap((v) => v.evidence)]),
+  ).sort((a, b) => a.localeCompare(b));
+
+  const saveViolation = (item: ViolationItem, draft: ViolationDraft) => {
+    if (!violationStore) return;
+    violationStore.updateViolation(
+      item.id,
+      {
+        title: draft.title.trim() || item.title,
+        description: draft.description,
+        severity: draft.severity,
+        statute: draft.statute.trim(),
+        jurisdiction: draft.jurisdiction.trim(),
+        evidence: draft.evidence,
+      },
+      violationActor,
+    );
+    setEditingViolation(null);
+  };
+
+  const addViolation = (draft: ViolationDraft) => {
+    if (!violationStore) return;
+    violationStore.createViolation(
+      {
+        id: `violation-${Math.round(performance.now())}-${Math.random().toString(36).slice(2, 6)}`,
+        title: draft.title.trim(),
+        severity: draft.severity,
+        description: draft.description,
+        jurisdiction: draft.jurisdiction.trim(),
+        statute: draft.statute.trim(),
+        // Cited by the attorney, so there is no AI analysis behind it — the card
+        // shows none rather than borrowing another violation's.
+        aiSummary: "",
+        whyApplied: "",
+        confidence: 0,
+        evidenceStrength: "Moderate",
+        similar: [],
+        evidence: draft.evidence,
+      },
+      violationActor,
+    );
+    setAddingViolation(false);
   };
   // Severity cells — Low is only shown when at least one Low violation exists.
   const severityCells = ([["Critical", counts.Critical], ["High", counts.High], ["Medium", counts.Medium], ["Low", counts.Low]] as const)
@@ -5359,11 +5587,56 @@ export function LiabilityAnalysisTab({ goTo, documents }: TabProps) {
       {/* RIGHT — Violation cards inside an off-white container (~68%) */}
       <div className="flex-1 min-w-0">
         <div className="lg-card bg-offwhite p-6 space-y-4">
-        <h2 className="page-title" style={{ fontSize: "24px" }}>Violations</h2>
-        {VIOLATION_CARDS.map((v, i) => {
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="page-title" style={{ fontSize: "24px" }}>Violations</h2>
+          {violationStore && !addingViolation && (
+            <button
+              onClick={() => { setEditingViolation(null); setViolationDraft(blankViolationDraft(LEGAL_FRAMEWORK.venue)); setAddingViolation(true); }}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-line bg-white text-xs font-semibold text-deep hover:border-brand transition-colors shrink-0"
+            >
+              <Plus className="w-3.5 h-3.5" strokeWidth={2} /> Add Violation
+            </button>
+          )}
+        </div>
+        {addingViolation && violationStore && (
+          <div className="lg-card p-6">
+            <ViolationForm
+              title="Add Violation"
+              draft={violationDraft}
+              setDraft={setViolationDraft}
+              onCancel={() => setAddingViolation(false)}
+              onSave={() => addViolation(violationDraft)}
+              saveLabel="Add Violation"
+              available={violationDocNames}
+              statutes={violationStore.statutes}
+            />
+          </div>
+        )}
+        {violations.map((v, i) => {
           const statuteShown = statuteOpen.has(v.id);
           const similarShown = similarOpen.has(v.id);
           const docsShown = docsOpen.has(v.id);
+          const changed = v.provenance !== "ai-generated";
+
+          if (editingViolation === v.id && violationStore) {
+            return (
+              <div key={v.id} className="lg-card p-6">
+                <ViolationForm
+                  title={`Edit ${v.title}`}
+                  draft={violationDraft}
+                  setDraft={setViolationDraft}
+                  onCancel={() => setEditingViolation(null)}
+                  onSave={() => saveViolation(v, violationDraft)}
+                  saveLabel="Save Changes"
+                  available={violationDocNames}
+                  statutes={violationStore.statutes}
+                  onDelete={() => setDeletingViolation(v.id)}
+                  onHistory={() => setHistoryViolation(v.id)}
+                />
+              </div>
+            );
+          }
+
           return (
             <div key={v.id} className="lg-card p-6 space-y-4">
               {/* Header — title + severity + description */}
@@ -5372,8 +5645,36 @@ export function LiabilityAnalysisTab({ goTo, documents }: TabProps) {
                   <Gavel className="w-5 h-5 text-deep shrink-0" strokeWidth={1.75} />
                   <h3 className="text-xl font-semibold text-ink leading-tight tracking-tight">{v.title}</h3>
                   <span className={VIOLATION_SEVERITY_PILL[v.severity]}>{v.severity}</span>
+                  {changed && (
+                    <span className="pill pill-neutral">
+                      {v.provenance.startsWith("ai")
+                        ? <Sparkles className="w-3 h-3" strokeWidth={1.75} />
+                        : <UserPlus className="w-3 h-3" strokeWidth={1.75} />}
+                      {VIOLATION_PROVENANCE_LABEL[v.provenance]}
+                    </span>
+                  )}
+                  {violationStore && (
+                    <button
+                      onClick={() => { setAddingViolation(false); setViolationDraft(violationDraftOf(v)); setEditingViolation(v.id); }}
+                      title="Edit violation"
+                      aria-label={`Edit ${v.title}`}
+                      className="ml-auto inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-semibold text-[#8A98A3] hover:bg-tint hover:text-deep transition-colors shrink-0"
+                    >
+                      <Pencil className="w-3.5 h-3.5" strokeWidth={1.75} /> Edit
+                    </button>
+                  )}
                 </div>
                 <p className="body-text leading-relaxed mt-2">{v.description}</p>
+                {/* The AI read the wording as it was. Once it is rewritten by
+                    hand, its summary and confidence are stale and say so. */}
+                {v.aiStale && (
+                  <div className="mt-3 flex items-start gap-1.5 rounded-lg border border-[#FDE6C8] bg-[#FFF7ED] px-2.5 py-2">
+                    <AlertTriangle className="w-3.5 h-3.5 text-[#B45309] shrink-0 mt-0.5" strokeWidth={1.75} />
+                    <p className="text-[11px] text-[#B45309] leading-relaxed">
+                      This violation has been edited since the AI analysed it. The AI summary and confidence below may be out of date.
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Meta row — Location | Supporting Documents | Applied Legal Statute, divided */}
@@ -5513,6 +5814,28 @@ export function LiabilityAnalysisTab({ goTo, documents }: TabProps) {
       onClose={() => setWsOpen(false)}
       onDownload={() => {}}
     />
+
+    {/* Confirmation before a violation is removed, and the change history for
+        one violation. Both are dismissible and change nothing on open. */}
+    {deletingViolationItem && violationStore && (
+      <DeleteViolationDialog
+        item={deletingViolationItem}
+        onCancel={() => setDeletingViolation(null)}
+        onConfirm={() => {
+          violationStore.deleteViolation(deletingViolationItem.id, violationActor);
+          setDeletingViolation(null);
+          // The form was open on a violation that no longer exists.
+          setEditingViolation((id) => (id === deletingViolationItem.id ? null : id));
+        }}
+      />
+    )}
+    {historyViolationItem && violationStore && (
+      <ViolationHistoryDrawer
+        item={historyViolationItem}
+        entries={violationStore.historyFor(historyViolationItem.id)}
+        onClose={() => setHistoryViolation(null)}
+      />
+    )}
     </>
   );
 }

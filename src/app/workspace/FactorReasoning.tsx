@@ -8,7 +8,7 @@ import {
   summarisePrecedents, patternsAcross, compareToPrecedents, recommendationFor,
   settlementInfluence, whyItMatches, relevanceOf, positionAgainstPrecedents,
   caseOverview, mapToCurrentCase, mappingNote, settlementContext, answerAboutPrecedent,
-  OVERVIEW_UNRECORDED,
+  OVERVIEW_UNRECORDED, CLINICAL_UNAVAILABLE,
   type PrecedentCase, type CurrentCaseProfile,
 } from "../damages/precedentAnalysis";
 
@@ -107,6 +107,11 @@ function TightBullets({ items }: { items: string[] }) {
   );
 }
 
+// The clinical dimensions say "not available in case record"; the legal ones
+// say the precedent data does not record them. Same meaning, the wording each
+// section warrants.
+const CLINICAL_LABELS = new Set(["Treatment Profile", "Injury Impact", "Duration", "Treating Providers"]);
+
 function PrecedentCard({
   c, s, current, defaultOpen,
 }: { c: PrecedentCase; s: ReturnType<typeof summarisePrecedents>; current: CurrentCaseProfile; defaultOpen: boolean }) {
@@ -149,13 +154,6 @@ function PrecedentCard({
             <TightBullets items={whyItMatches(c)} />
           </Part>
 
-          {/* What it does to this valuation — the one line to catch at a glance */}
-          <Part label="Settlement influence">
-            <div className="rounded-lg bg-tint border border-[#D6F2F7] px-3 py-2">
-              <p className="text-xs text-ink leading-relaxed">{settlementInfluence(c.amount, s)}</p>
-            </div>
-          </Part>
-
           {/* What actually happened — one bordered disclosure, nothing nested
               inside it but headings and hairlines. */}
           <div className="pt-3 mt-3 border-t border-line">
@@ -185,21 +183,30 @@ function PrecedentCard({
                         ))}
                       </div>
                     )}
+                    {o.facts.length > 0 && o.items.length > 0 && (
+                      <div className="text-[10px] font-semibold uppercase tracking-[0.06em] text-[#8A98A3] mb-0.5">Key impact</div>
+                    )}
                     {o.items.length > 0 && <TightBullets items={o.items} />}
-                    {o.empty && <p className="text-[11px] text-[#8A98A3] italic">{OVERVIEW_UNRECORDED}</p>}
+                    {o.empty && (
+                      <p className="text-[11px] text-[#8A98A3] italic">
+                        {CLINICAL_LABELS.has(o.label) ? CLINICAL_UNAVAILABLE : OVERVIEW_UNRECORDED}
+                      </p>
+                    )}
                   </div>
                 ))}
-                <div className="pt-2.5 border-t border-line">
-                  <div className="text-[10.5px] font-semibold uppercase tracking-[0.07em] text-[#5B6B78] mb-1">Settlement outcome</div>
-                  <p className="text-sm font-bold text-ink tabular-nums">{money(ctx.amount)}</p>
-                  <div className="flex flex-wrap gap-1 mt-1.5">
-                    {ctx.factors.map((f) => <span key={f} className="pill pill-neutral">{f}</span>)}
-                  </div>
-                  <p className="text-xs text-[#5B6B78] leading-relaxed mt-1.5">{ctx.why}</p>
-                </div>
               </div>
             )}
           </div>
+
+          {/* What the case settled at, and the attributes behind it. Outside the
+              disclosure because it is the figure the attorney compares against. */}
+          <Part label="Settlement outcome">
+            <p className="text-lg font-bold text-ink tabular-nums leading-none">{money(ctx.amount)}</p>
+            <div className="flex flex-wrap gap-1 mt-2">
+              {ctx.factors.map((f) => <span key={f} className="pill pill-neutral">{f}</span>)}
+            </div>
+            <p className="text-xs text-[#5B6B78] leading-relaxed mt-2">{ctx.why}</p>
+          </Part>
 
           {/* How it lines up here — the raw comparison, kept compact */}
           <Part label="How it maps to the current case">
@@ -236,6 +243,14 @@ function PrecedentCard({
           <Part label="AI interpretation">
             <div className="rounded-lg bg-[#F6FDFF] border border-[#D6F2F7] px-3 py-2">
               <p className="text-xs text-ink leading-relaxed">{mappingNote(c, current, s)}</p>
+            </div>
+          </Part>
+
+          {/* Where this precedent sits in the range — the line the attorney
+              carries away, so it closes the card. */}
+          <Part label="Settlement influence">
+            <div className="rounded-lg bg-tint border border-[#D6F2F7] px-3 py-2">
+              <p className="text-xs text-ink leading-relaxed">{settlementInfluence(c.amount, s)}</p>
             </div>
           </Part>
         </div>

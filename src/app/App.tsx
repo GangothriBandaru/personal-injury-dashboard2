@@ -20,6 +20,7 @@ import { ChronologyProvider } from "./chronology/ChronologyContext";
 import { DamagesProvider } from "./damages/DamagesContext";
 import { FactorsProvider } from "./damages/FactorsContext";
 import { PillarsProvider } from "./workspace/PillarsContext";
+import { ViolationsProvider } from "./workspace/ViolationsContext";
 import { AssistantLauncher, AssistantPanel, AssistantMain } from "./assistant/AiAssistant";
 import {
   PipelineState, CaseDocument, AttorneyNote,
@@ -229,6 +230,7 @@ export default function App() {
     <DamagesProvider>
     <FactorsProvider>
     <PillarsProvider>
+    <ViolationsProvider>
     <NotesProvider caseName={currentCaseName} stage={currentStage}>
       <AssistantProvider
         page={activePage}
@@ -256,6 +258,7 @@ export default function App() {
       <FloatingNotes />
       </AssistantProvider>
     </NotesProvider>
+    </ViolationsProvider>
     </PillarsProvider>
     </FactorsProvider>
     </DamagesProvider>
