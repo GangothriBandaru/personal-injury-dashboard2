@@ -3,6 +3,7 @@ import {
   FileText, Image as ImageIcon, Video, Search, SlidersHorizontal, ChevronDown, X, Sparkles,
   ShieldCheck, UserPlus, AlertTriangle, CheckCircle, Eye, Play, Pause, ZoomIn, ZoomOut,
   Scale, Activity, DollarSign, Gavel, Link2, Loader2, RotateCcw, ArrowRight, Users,
+  Layers, Clock,
 } from "lucide-react";
 import type { CaseDocument, AnalysisFinding } from "../types/case";
 import {
@@ -718,7 +719,7 @@ interface Props {
 }
 
 const TYPE_FILTERS = ["All", "Medical", "Accident / Scene", "Police / Official", "Witness", "Insurance", "Financial", "Legal", "Vehicle / Physical", "Communications", "Other"];
-const FILE_FILTERS = ["All", "Documents", "PDF", "Images", "Videos"];
+const FILE_FILTERS = ["All", "Documents", "PDF", "Images", "Videos", "Images & Videos"];
 const ANALYSIS_FILTERS = ["All", "Analyzed", "Needs Review", "Pending Analysis"];
 const STATUS_FILTERS = ["All", "Verified", "User Added", "System Generated"];
 const RELEVANCE_FILTERS = ["All", "Liability", "Causation", "Damages", "Violations", "Settlement", "Multiple"];
@@ -737,11 +738,50 @@ const TYPE_OF_BUCKET: Record<string, string> = {
   "Other Evidence": "Other",
 };
 
+const slugOf = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+
 const BUCKET_ORDER = [
   "Medical Evidence", "Accident / Scene Evidence", "Police & Official Reports", "Witness Evidence",
   "Insurance Evidence", "Financial & Wage Loss Evidence", "Legal & Case Documents",
   "Vehicle / Physical Evidence", "Communications", "Other Evidence",
 ];
+
+// ── Quick Access ──────────────────────────────────────────────────────────────
+// The attorney arrives asking "what do I want to look at?" rather than knowing
+// how the evidence is filed. These are shortcuts onto the filters and sections
+// already on the page — no new view, no second set of categories.
+
+// A high-level shortcut: what it sets, and how to tell it is the one in force.
+interface Shortcut {
+  label: string;
+  hint: string;
+  icon: any;
+  /** The filter state this shortcut represents. */
+  file: string;
+  analysis: string;
+  recent: boolean;
+}
+
+const SHORTCUTS: Shortcut[] = [
+  { label: "All Evidence", hint: "Everything on the case", icon: Layers, file: "All", analysis: "All", recent: false },
+  { label: "Documents", hint: "Document-based evidence", icon: FileText, file: "Documents", analysis: "All", recent: false },
+  { label: "Images & Videos", hint: "Visual evidence", icon: ImageIcon, file: "Images & Videos", analysis: "All", recent: false },
+  { label: "Needs Review", hint: "Awaiting your review", icon: AlertTriangle, file: "All", analysis: "Needs Review", recent: false },
+  { label: "Recently Added", hint: "Newest on the file", icon: Clock, file: "All", analysis: "All", recent: true },
+];
+
+// The eight categories the page already groups by, with a line saying what each
+// holds. The bucket name is the link — clicking opens that same section.
+const CATEGORY_BLURB: Record<string, string> = {
+  "Medical Evidence": "Medical records, treatment notes, imaging and related evidence",
+  "Accident / Scene Evidence": "Photos, videos, scene documentation and accident evidence",
+  "Police & Official Reports": "Police reports and other official records",
+  "Witness Evidence": "Witness statements and testimony-related evidence",
+  "Insurance Evidence": "Policies, correspondence and coverage documentation",
+  "Financial & Wage Loss Evidence": "Bills, wage records and financial documentation",
+  "Legal & Case Documents": "Pleadings, legal documents, correspondence and case records",
+  "Vehicle / Physical Evidence": "Vehicle records, inspection evidence and physical evidence",
+};
 
 export function EvidenceStageTab({ documents, findings, userChronology, goTo }: Props) {
   const [search, setSearch] = useState("");
@@ -751,6 +791,9 @@ export function EvidenceStageTab({ documents, findings, userChronology, goTo }: 
   const [fAnalysis, setFAnalysis] = useState("All");
   const [fStatus, setFStatus] = useState("All");
   const [fRelevance, setFRelevance] = useState("All");
+  // "Recently Added" reads the date the repository records against each
+  // document. It is a view of the newest, not a new category.
+  const [fRecent, setFRecent] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [runState, setRunState] = useState<Record<string, AnalysisState>>({});
   const [previewDoc, setPreviewDoc] = useState<CaseDocument | null>(null);
@@ -875,6 +918,7 @@ export function EvidenceStageTab({ documents, findings, userChronology, goTo }: 
     if (fFile !== "All") {
       if (fFile === "Images" && i.format !== "image") return false;
       if (fFile === "Videos" && i.format !== "video") return false;
+      if (fFile === "Images & Videos" && i.format !== "image" && i.format !== "video") return false;
       if ((fFile === "Documents" || fFile === "PDF") && i.format !== "document") return false;
     }
     if (fAnalysis !== "All") {
@@ -903,12 +947,56 @@ export function EvidenceStageTab({ documents, findings, userChronology, goTo }: 
     return true;
   });
 
+  // "Recently Added" narrows to the newest items by the date the repository
+  // records, applied after the other filters so it composes with them.
+  const RECENT_COUNT = 10;
+  const recentKeys = useMemo(() => {
+    const dated = [...items]
+      .map((i) => ({ key: i.key, at: Date.parse(i.doc.date) }))
+      .filter((d) => !Number.isNaN(d.at))
+      .sort((a, b) => b.at - a.at)
+      .slice(0, RECENT_COUNT);
+    return new Set(dated.map((d) => d.key));
+  }, [items]);
+
+  const shown = fRecent ? visible.filter((i) => recentKeys.has(i.key)) : visible;
+
   const buckets = BUCKET_ORDER
-    .map((name) => ({ name, docs: visible.filter((i) => i.bucket === name) }))
+    .map((name) => ({ name, docs: shown.filter((i) => i.bucket === name) }))
     .filter((b) => b.docs.length > 0);
 
-  const activeFilters = [fType, fFile, fAnalysis, fStatus, fRelevance].filter((f) => f !== "All").length;
-  const resetFilters = () => { setFType("All"); setFFile("All"); setFAnalysis("All"); setFStatus("All"); setFRelevance("All"); };
+  const activeFilters = [fType, fFile, fAnalysis, fStatus, fRelevance].filter((f) => f !== "All").length + (fRecent ? 1 : 0);
+  const resetFilters = () => {
+    setFType("All"); setFFile("All"); setFAnalysis("All"); setFStatus("All"); setFRelevance("All"); setFRecent(false);
+  };
+
+  // ── Quick Access actions ────────────────────────────────────────────────
+  // Each drives the filters and sections already on the page. A category card
+  // opens that same section and scrolls to it — it never opens a second view.
+  const applyShortcut = (sc: Shortcut) => {
+    setFType("All");
+    setFFile(sc.file);
+    setFAnalysis(sc.analysis);
+    setFStatus("All");
+    setFRelevance("All");
+    setFRecent(sc.recent);
+    setSearch("");
+    document.getElementById("evidence-sections")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const activeShortcut = SHORTCUTS.find((sc) =>
+    sc.file === fFile && sc.analysis === fAnalysis && sc.recent === fRecent
+    && fType === "All" && fStatus === "All" && fRelevance === "All");
+
+  const openCategory = (bucket: string) => {
+    resetFilters();
+    setSearch("");
+    setExpanded((p) => ({ ...p, [bucket]: true }));
+    // Let the section render open before scrolling to it.
+    window.setTimeout(() => {
+      document.getElementById(`evidence-bucket-${slugOf(bucket)}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 60);
+  };
 
   const openItem = (item: EvidenceItem) => {
     if (item.format === "document") setPreviewDoc(item.doc);
@@ -977,6 +1065,65 @@ export function EvidenceStageTab({ documents, findings, userChronology, goTo }: 
               ))}
             </div>
 
+            {/* ── Quick Access ──────────────────────────────────────────────
+                Shortcuts onto the filters and sections below, so the attorney
+                does not have to know how the evidence is filed to find it. */}
+            <div className="rounded-2xl border border-line bg-white p-5">
+              <h3 className="card-title">What would you like to review?</h3>
+              <p className="secondary-text mt-1">
+                Access case documents, medical records, reports, images, videos and other evidence from one place.
+              </p>
+
+              <div className="eyebrow mt-4 mb-2">Quick Access</div>
+              <div className="flex flex-wrap gap-2">
+                {SHORTCUTS.map((sc) => {
+                  const on = activeShortcut?.label === sc.label;
+                  return (
+                    <button
+                      key={sc.label}
+                      onClick={() => applyShortcut(sc)}
+                      title={sc.hint}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${
+                        on ? "border-brand bg-tint text-deep" : "border-line bg-white text-[#5B6B78] hover:border-brand hover:text-deep"
+                      }`}
+                    >
+                      <sc.icon className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} /> {sc.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="eyebrow mt-5 mb-2">Explore Evidence</div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {BUCKET_ORDER.filter((name) => CATEGORY_BLURB[name]).map((name) => {
+                  const count = items.filter((i) => i.bucket === name).length;
+                  return (
+                    <button
+                      key={name}
+                      onClick={() => openCategory(name)}
+                      disabled={count === 0}
+                      className={`text-left rounded-xl border p-3 transition-colors ${
+                        count === 0
+                          ? "border-line bg-wash cursor-not-allowed opacity-60"
+                          : "border-line bg-white hover:border-brand hover:bg-tint"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="text-sm font-semibold text-ink leading-snug">{name}</span>
+                        <span className="text-xs font-medium text-[#5B6B78] bg-white border border-line px-2 py-0.5 rounded-full shrink-0">
+                          {count}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-[#8A98A3] leading-snug mt-1">{CATEGORY_BLURB[name]}</p>
+                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-deep mt-2">
+                        {count === 0 ? "Nothing on file yet" : "View"} {count > 0 && <ArrowRight className="w-3 h-3" strokeWidth={2} />}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             {/* Evidence intelligence */}
             <div className="rounded-2xl border border-line bg-white p-5">
               <div className="flex items-center gap-2 mb-4">
@@ -1013,7 +1160,7 @@ export function EvidenceStageTab({ documents, findings, userChronology, goTo }: 
             </div>
 
             {/* Search + filters */}
-            <div className="space-y-3">
+            <div id="evidence-sections" className="space-y-3 scroll-mt-[184px]">
               <div className="flex items-center gap-2 flex-wrap">
                 <div className="relative flex-1 min-w-[220px]">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#5B6B78]" strokeWidth={1.75} />
@@ -1074,7 +1221,7 @@ export function EvidenceStageTab({ documents, findings, userChronology, goTo }: 
                     .map(([label, fmt]) => ({ label, docs: b.docs.filter((d) => d.format === fmt) }))
                     .filter((g) => g.docs.length > 0);
                   return (
-                    <div key={b.name} className="border border-line rounded-xl overflow-hidden bg-white">
+                    <div key={b.name} id={`evidence-bucket-${slugOf(b.name)}`} className="border border-line rounded-xl overflow-hidden bg-white scroll-mt-[184px]">
                       <button
                         onClick={() => setExpanded((p) => ({ ...p, [b.name]: !p[b.name] }))}
                         className="w-full flex items-center justify-between px-5 py-3.5 bg-wash hover:bg-tint transition-colors text-left"

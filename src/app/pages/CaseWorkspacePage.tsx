@@ -25,22 +25,27 @@ interface CaseWorkspacePageProps {
   onNavigateToValuation?: () => void;
 }
 
+// The workflow stages, numbered in order. Evidence is not among them: it is a
+// case-level resource the attorney reaches from the header at any point, not a
+// step they work through once.
 const TABS = [
   { id: "overview", label: "Case Overview" },
   { id: "medical", label: "Chronology" },
   { id: "economic", label: "Damages Analysis" },
   { id: "noneconomic", label: "Negligence" },
   { id: "liability", label: "Violations" },
-  { id: "evidencehub", label: "Evidence" },
   { id: "evidence", label: "Case Journey" },
   { id: "demand", label: "Intelligence" },
   { id: "negotiation", label: "Negotiations" },
 ];
 
-// Stages that close with a stage-specific Evidence section. The Evidence stage
-// itself is excluded — it is the evidence surface, so a summary of its own
-// evidence at the bottom would be circular.
-const STAGE_IDS = TABS.map((t) => t.id).filter((id) => id !== "evidencehub") as StageId[];
+// The Evidence workspace, opened from the header rather than the stage bar.
+const EVIDENCE_VIEW = "evidencehub";
+
+// Stages that close with a stage-specific Evidence section. The Evidence
+// workspace itself is excluded — it is the evidence surface, so a summary of its
+// own evidence at the bottom would be circular.
+const STAGE_IDS = [...TABS.map((t) => t.id), EVIDENCE_VIEW].filter((id) => id !== EVIDENCE_VIEW) as StageId[];
 // Stages laid out at max-w-4xl — the Evidence section matches their width.
 const NARROW_STAGES: StageId[] = ["evidence", "negotiation"];
 // Anchor for each stage's own Evidence section, targeted by its View Evidence
@@ -74,6 +79,12 @@ const GENERATE_STEPS = [
 
 export function CaseWorkspacePage({ caseData, analysisFindings = [], documents = [], onBackToIntake, onNavigateToValuation }: CaseWorkspacePageProps) {
   const [activeTab, setActiveTab] = useState("overview");
+  // The stage to return to when leaving the Evidence workspace, so the header
+  // action behaves like opening a resource rather than navigating away.
+  const [lastStage, setLastStage] = useState("overview");
+  useEffect(() => {
+    if (TABS.some((t) => t.id === activeTab)) setLastStage(activeTab);
+  }, [activeTab]);
 
   // Tell the AI Assistant which stage is open, so its Current Stage scope
   // follows the workspace without the attorney selecting it again.
@@ -251,7 +262,22 @@ export function CaseWorkspacePage({ caseData, analysisFindings = [], documents =
             <div className="ml-auto flex items-center gap-2 min-w-0">
               <span>Case Workspace</span>
               <ChevronRight className="w-3.5 h-3.5 text-[#9BA8B4]" strokeWidth={1.75} />
-              <span className="text-ink font-medium truncate">{model.caseName}</span>
+              {activeTab === EVIDENCE_VIEW ? (
+                <>
+                  {/* On the Evidence workspace the case name becomes the way
+                      back to the stage the attorney came from. */}
+                  <button
+                    onClick={() => setActiveTab(lastStage)}
+                    className="truncate hover:text-ink transition-colors"
+                  >
+                    {model.caseName}
+                  </button>
+                  <ChevronRight className="w-3.5 h-3.5 text-[#9BA8B4]" strokeWidth={1.75} />
+                  <span className="text-ink font-medium">Evidence</span>
+                </>
+              ) : (
+                <span className="text-ink font-medium truncate">{model.caseName}</span>
+              )}
             </div>
           </div>
 
@@ -264,8 +290,12 @@ export function CaseWorkspacePage({ caseData, analysisFindings = [], documents =
               <button onClick={() => setActiveTab("demandspace")} className={`btn gap-2 ${activeTab === "demandspace" ? "btn-primary" : "btn-secondary"}`}>
                 <FileSignature className="w-4 h-4" strokeWidth={1.75} /> Demand Space
               </button>
-              <button onClick={() => setActiveTab("evidence")} className="btn btn-secondary gap-2">
-                <FolderOpen className="w-4 h-4" strokeWidth={1.75} /> Documents
+              {/* Evidence is a case-level resource, reachable from any stage. */}
+              <button
+                onClick={() => setActiveTab(EVIDENCE_VIEW)}
+                className={`btn gap-2 ${activeTab === EVIDENCE_VIEW ? "btn-primary" : "btn-secondary"}`}
+              >
+                <FolderOpen className="w-4 h-4" strokeWidth={1.75} /> Evidence
               </button>
               <button className="btn btn-secondary gap-2">
                 <Settings2 className="w-4 h-4" strokeWidth={1.75} /> Manage Case
