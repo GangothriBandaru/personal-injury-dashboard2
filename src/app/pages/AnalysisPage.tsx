@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { StageNavigator } from "../components/StageNavigator";
 import {
   ChevronLeft, ChevronRight, ChevronDown, CheckCircle, FileText, Eye, Download, X,
   AlertCircle, ArrowRight, User, Building2, Shield, Scale, Stethoscope, Gavel,
-  Users, Bot, Sparkles
+  Users, Bot, Sparkles, ArrowUpRight
 } from "lucide-react";
+import { INSURANCE_ANALYSIS } from "../insurance/insuranceData";
 import { Button } from "../components/ui/button";
 import { DocActions, DocumentWorkspaceModal } from "../components/DocumentWorkspace";
 import {
@@ -26,6 +27,10 @@ interface AnalysisPageProps {
   onStageClick?: (stageName: string) => void;
   onBackToIntake?: () => void;
   onProceedToValuation?: () => void;
+  /** Opens the Insurance Policy Analysis summary. */
+  onOpenInsurance?: () => void;
+  /** Section to bring into view on arrival — used when returning from a sub-page. */
+  scrollToSection?: string;
 }
 
 // Case narrative — incident → treatment → injury → damages → case ready
@@ -126,7 +131,13 @@ const timelineEvents: TimelineEvent[] = [
 // Total events LECO extracted from the record; the timeline surfaces only the key ones
 const EXTRACTED_EVENT_COUNT = 53;
 
-export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToIntake, onProceedToValuation }: AnalysisPageProps) {
+export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToIntake, onProceedToValuation, onOpenInsurance, scrollToSection }: AnalysisPageProps) {
+  // Returning from a sub-page lands back on the section it was opened from.
+  useEffect(() => {
+    if (!scrollToSection) return;
+    const t = setTimeout(() => document.getElementById(scrollToSection)?.scrollIntoView({ block: "start" }), 50);
+    return () => clearTimeout(t);
+  }, [scrollToSection]);
   const [showDocumentPreview, setShowDocumentPreview] = useState(false);
   // Each entry is one item's set of supporting documents; the workspace pages
   // between items (Prev/Next) and shows each item's documents as viewer tabs.
@@ -601,6 +612,41 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
             })()}
           </div>
 
+        {/* ── Insurance Policy Analysis ──
+            Entry point to the insurance module; the analysis itself lives on its
+            own pages so this stage stays a scannable overview. */}
+        <div id="insurance-analysis" className="lg-card bg-offwhite p-6 scroll-mt-[150px]">
+          {/* Same finding card as the signals above: icon eyebrow, title,
+              summary, a divider meta row, then an outline action. */}
+          <div className="lg-card-i rounded-xl border border-line bg-white flex flex-col">
+            <div className="p-5 flex flex-col flex-1">
+              <div className="eyebrow flex items-center gap-1.5 mb-2">
+                <Shield className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                Insurance
+              </div>
+              <h3 className="card-title mb-2 leading-snug">{INSURANCE_ANALYSIS.title}</h3>
+              <p className="body-text leading-relaxed">
+                Legal validity, coverage, limits, red flags, liens and insurer profile in one attorney-ready view.
+              </p>
+              <div className="mt-4 pt-4 border-t border-line flex items-end justify-between gap-4 flex-wrap">
+                <div>
+                  <span className="eyebrow">Analysed</span>
+                  <div className="flex items-center gap-1.5 secondary-text mt-1.5">
+                    <FileText className="w-4 h-4 text-[#5B6B78]" strokeWidth={1.75} />
+                    {INSURANCE_ANALYSIS.analysedOn}
+                  </div>
+                </div>
+                <button
+                  onClick={onOpenInsurance}
+                  className="flex items-center justify-center gap-1.5 px-4 py-2 bg-white border border-line text-deep rounded-lg text-sm font-medium hover:bg-tint transition-colors"
+                >
+                  Open <ArrowUpRight className="w-4 h-4" strokeWidth={1.75} />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* ── Evidence Verification ── */}
         <div id="evidence-verification" className="lg-card !p-0 overflow-hidden scroll-mt-[150px]">
           <div className="px-6 py-5 border-b border-line">
@@ -672,15 +718,21 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
                 { value: liabilityCount, label: "Liability Signals", onClick: () => goToSignals("liability") },
                 { value: injuryCount, label: "Injury Signals", onClick: () => goToSignals("injury") },
                 { value: violationCount, label: "Violation Analysis", onClick: () => goToSignals("violations") },
+                // Insurance has no count to show, so its icon takes the value slot —
+                // a navigation entry, not a figure from the analysis.
+                { value: null, label: "Insurance Analysis", icon: Shield, onClick: () => onOpenInsurance?.() },
                 { value: verifiedCount, label: "Verified Evidence", onClick: () => scrollToId("evidence-verification") },
-              ] as const).map(({ value, label, onClick }) => (
+              ] as { value: number | null; label: string; icon?: any; onClick: () => void }[]).map(({ value, label, icon: Icon, onClick }) => (
                 <button
                   key={label}
                   onClick={onClick}
                   className="group w-full lg-zone rounded-xl p-4 text-left flex items-center justify-between gap-3 transition-all hover:border-soft hover:bg-wash hover:shadow-sm active:scale-[0.99]"
                 >
                   <div>
-                    <div className="kpi-value leading-none">{value}</div>
+                    {/* The icon is sized to the value's line so every tile is the same height. */}
+                    <div className="kpi-value leading-none">
+                      {Icon ? <Icon className="w-7 h-7 text-deep" strokeWidth={1.75} /> : value}
+                    </div>
                     <div className="eyebrow mt-1.5">{label}</div>
                   </div>
                   <ArrowRight className="w-4 h-4 text-deep shrink-0 opacity-0 -translate-x-1 group-hover:opacity-100 group-hover:translate-x-0 transition-all" strokeWidth={1.75} />

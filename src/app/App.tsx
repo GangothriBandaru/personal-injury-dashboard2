@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { DashboardSidebar } from "./components/DashboardSidebar";
 import { DashboardTopbar } from "./components/DashboardTopbar";
 import { GlobalCaseRepoPage } from "./pages/GlobalCaseRepoPage";
@@ -10,6 +10,8 @@ import { CaseIntakePage } from "./pages/CaseIntakePage";
 import { IntakeWorkflowPage } from "./pages/IntakeWorkflowPage";
 import { ClassificationPage } from "./pages/ClassificationPage";
 import { AnalysisPage } from "./pages/AnalysisPage";
+import { InsuranceSummaryPage } from "./pages/InsuranceSummaryPage";
+import { InsuranceDetailPage } from "./pages/InsuranceDetailPage";
 import { ValuationPage } from "./pages/ValuationPage";
 import { CaseReadyPage } from "./pages/CaseReadyPage";
 import { CaseWorkspacePage } from "./pages/CaseWorkspacePage";
@@ -77,6 +79,40 @@ export default function App() {
   const [selectedCase, setSelectedCase] = useState<any>(null);
   const [pipeline, setPipeline] = useState<PipelineState>(INITIAL_PIPELINE);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // Section of the stage page to land on when returning from a sub-page.
+  const [returnToSection, setReturnToSection] = useState<string | undefined>(undefined);
+  // The insurance pages are shared by Analysis and Case Ready; this is the
+  // stage they were opened from, and the one they return to.
+  const [insuranceOrigin, setInsuranceOrigin] = useState<"analysis" | "case-ready" | "workspace">("analysis");
+  const openInsurancePage = (page: "insurance" | "insurance-detail") => setActivePage(page);
+  const openInsuranceFrom = (origin: "analysis" | "case-ready" | "workspace") => {
+    setInsuranceOrigin(origin);
+    setActivePage("insurance");
+  };
+  const backToInsuranceOrigin = () => {
+    if (insuranceOrigin === "workspace") {
+      // The workspace reopens on Case Overview, where the carrier tile sits at the top.
+      setActivePage("workspace");
+      setTimeout(() => document.querySelector("main")?.scrollTo(0, 0), 0);
+      return;
+    }
+    setReturnToSection(insuranceOrigin === "case-ready" ? "insurance-deliverable" : "insurance-analysis");
+    setActivePage(insuranceOrigin);
+  };
+  const INSURANCE_BACK_LABEL = {
+    analysis: "Back to Analysis",
+    "case-ready": "Back to Case Ready",
+    workspace: "Back to Case Overview",
+  } as const;
+  // A return target applies to that one return only.
+  useEffect(() => {
+    if (activePage !== "analysis" && activePage !== "case-ready") setReturnToSection(undefined);
+    // The insurance pages are full pages, so each opens at the top of the
+    // scrolling main area rather than wherever the previous page was left.
+    if (activePage === "insurance" || activePage === "insurance-detail") {
+      document.querySelector("main")?.scrollTo(0, 0);
+    }
+  }, [activePage]);
 
   const updatePipeline = (updates: Partial<PipelineState>) => {
     setPipeline((prev) => ({ ...prev, ...updates }));
@@ -152,6 +188,27 @@ export default function App() {
               updatePipeline({ analysisDone: true });
               setActivePage("valuation");
             }}
+            onOpenInsurance={() => openInsuranceFrom("analysis")}
+            scrollToSection={returnToSection}
+          />
+        );
+      case "insurance":
+        return (
+          <InsuranceSummaryPage
+            caseName={selectedCase?.caseName ?? "Case"}
+            caseData={selectedCase}
+            documents={pipeline.documents}
+            backLabel={INSURANCE_BACK_LABEL[insuranceOrigin]}
+            onBack={backToInsuranceOrigin}
+            onOpenDetail={() => openInsurancePage("insurance-detail")}
+          />
+        );
+      case "insurance-detail":
+        return (
+          <InsuranceDetailPage
+            caseName={selectedCase?.caseName ?? "Case"}
+            onBack={() => openInsurancePage("insurance")}
+            onBackToAnalysis={backToInsuranceOrigin}
           />
         );
       case "valuation":
@@ -177,6 +234,8 @@ export default function App() {
             onStageClick={handleStageNavigation}
             onBackToIntake={() => setActivePage("intake")}
             onOpenWorkspace={() => { setActivePage("workspace"); setSidebarCollapsed(true); }}
+            onOpenInsurance={() => openInsuranceFrom("case-ready")}
+            scrollToSection={returnToSection}
           />
         );
       case "workspace":
@@ -187,6 +246,7 @@ export default function App() {
             documents={pipeline.documents}
             onBackToIntake={() => setActivePage("intake")}
             onNavigateToValuation={() => setActivePage("valuation")}
+            onOpenInsurance={() => openInsuranceFrom("workspace")}
           />
         );
       case "intake":
@@ -211,6 +271,8 @@ export default function App() {
     workflow: "Collection",
     classification: "Collection",
     analysis: "Analysis",
+    insurance: insuranceOrigin === "analysis" ? "Analysis" : "Case Ready",
+    "insurance-detail": insuranceOrigin === "analysis" ? "Analysis" : "Case Ready",
     valuation: "Valuation",
     "case-ready": "Case Ready",
     workspace: "Case Ready",

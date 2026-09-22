@@ -13,6 +13,8 @@ const initialIntakeCases = [
     caseName: "Estate of Miller vs Logistics Co.",
     caseId: "PI-2024-001",
     plaintiff: "Evelyn Miller",
+    caseType: "Medical Malpractice",
+    caseSubType: "Delayed Treatment",
     summary: "Delayed stroke response and negligent medication management at memory care facility.",
     jurisdiction: "Cook County, IL",
     plaintiffEmail: "evelyn.miller@gmail.com",
@@ -195,6 +197,8 @@ export function CaseIntakePage({ onOpenWorkflow }: CaseIntakePageProps) {
                     plaintiffEmail: intakeCase.plaintiffEmail,
                     jurisdiction: intakeCase.jurisdiction,
                     stage: intakeCase.stage,
+                    caseType: intakeCase.caseType,
+                    caseSubType: intakeCase.caseSubType,
                   })
                 }
               />

@@ -23,6 +23,8 @@ interface CaseWorkspacePageProps {
   documents?: CaseDocument[];
   onBackToIntake?: () => void;
   onNavigateToValuation?: () => void;
+  /** Opens the case's Insurance Policy Analysis (from the Case Snapshot carrier tile). */
+  onOpenInsurance?: () => void;
 }
 
 // The workflow stages, numbered in order. Evidence is not among them: it is a
@@ -77,7 +79,7 @@ const GENERATE_STEPS = [
   "Generating demand letter...",
 ];
 
-export function CaseWorkspacePage({ caseData, analysisFindings = [], documents = [], onBackToIntake, onNavigateToValuation }: CaseWorkspacePageProps) {
+export function CaseWorkspacePage({ caseData, analysisFindings = [], documents = [], onBackToIntake, onNavigateToValuation, onOpenInsurance }: CaseWorkspacePageProps) {
   const [activeTab, setActiveTab] = useState("overview");
   // The stage to return to when leaving the Evidence workspace, so the header
   // action behaves like opening a resource rather than navigating away.
@@ -209,7 +211,7 @@ export function CaseWorkspacePage({ caseData, analysisFindings = [], documents =
     estimatedHigh: caseData?.estimatedHigh ?? 1372325,
   };
 
-  const tabProps = { model, findings: analysisFindings, documents, goTo: setActiveTab, goToValuation: onNavigateToValuation, onGenerateDemand: startGenerateDemand };
+  const tabProps = { model, findings: analysisFindings, documents, goTo: setActiveTab, goToValuation: onNavigateToValuation, onGenerateDemand: startGenerateDemand, onOpenInsurance };
 
   const renderTab = () => {
     switch (activeTab) {

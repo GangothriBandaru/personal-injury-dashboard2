@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { StageNavigator } from "../components/StageNavigator";
 import {
   ChevronLeft, CheckCircle, ChevronDown, ChevronRight,
   FileText, ExternalLink,
   ClipboardList, Brain, BarChart2,
-  ArrowRight, Flag, Circle
+  ArrowRight, Flag, Circle, Shield
 } from "lucide-react";
+import { INSURANCE_ANALYSIS } from "../insurance/insuranceData";
 import { Button } from "../components/ui/button";
 import {
   PipelineState,
@@ -25,6 +26,10 @@ interface CaseReadyPageProps {
   onStageClick?: (stageName: string) => void;
   onBackToIntake?: () => void;
   onOpenWorkspace?: () => void;
+  /** Opens the Insurance Policy Analysis — the same pages Analysis opens. */
+  onOpenInsurance?: () => void;
+  /** Section to bring into view on arrival — used when returning from a sub-page. */
+  scrollToSection?: string;
 }
 
 const CHECKLIST_DETAILS: Record<string, string> = {
@@ -72,7 +77,13 @@ const deliverables = [
   },
 ];
 
-export function CaseReadyPage({ caseData, pipeline, onStageClick, onBackToIntake, onOpenWorkspace }: CaseReadyPageProps) {
+export function CaseReadyPage({ caseData, pipeline, onStageClick, onBackToIntake, onOpenWorkspace, onOpenInsurance, scrollToSection }: CaseReadyPageProps) {
+  // Returning from a sub-page lands back on the deliverable it was opened from.
+  useEffect(() => {
+    if (!scrollToSection) return;
+    const t = setTimeout(() => document.getElementById(scrollToSection)?.scrollIntoView({ block: "center" }), 50);
+    return () => clearTimeout(t);
+  }, [scrollToSection]);
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
 
   // Derive checklist from pipeline state
@@ -259,8 +270,9 @@ export function CaseReadyPage({ caseData, pipeline, onStageClick, onBackToIntake
             </div>
           </div>
 
-          {/* RIGHT — Generated Deliverables (60%) */}
-          <div className="col-span-3 lg-card overflow-hidden">
+          {/* RIGHT (60%) — Generated Deliverables, with Insurance beneath it */}
+          <div className="col-span-3 space-y-6">
+          <div className="lg-card overflow-hidden">
             <div className="flex items-center justify-between px-6 py-4 border-b border-line">
               <h2 className="section-header">Generated Deliverables</h2>
               <span className="secondary-text">6 documents ready</span>
@@ -286,6 +298,32 @@ export function CaseReadyPage({ caseData, pipeline, onStageClick, onBackToIntake
                 </div>
               ))}
             </div>
+          </div>
+
+          {/* Insurance Policy Analysis — beneath Generated Deliverables, the same
+              deliverable card at the container's width, opening the insurance
+              analysis Stage 2 produced. */}
+          <div id="insurance-deliverable" className="lg-card lg-card-i p-6 flex flex-col scroll-mt-[150px]">
+            <div className="flex items-start justify-between mb-3">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-tint text-deep">
+                <Shield className="w-3.5 h-3.5" strokeWidth={1.75} />
+                Insurance
+              </div>
+            </div>
+            <h3 className="card-title mb-1">{INSURANCE_ANALYSIS.title}</h3>
+            <p className="secondary-text leading-relaxed flex-1">
+              Legal validity, coverage, limits, red flags, liens and insurer profile in one attorney-ready view.
+            </p>
+            <div className="flex items-center justify-between mt-4 pt-3 border-t border-line">
+              <span className="mono-ref">{INSURANCE_ANALYSIS.analysedOn}</span>
+              <button
+                onClick={onOpenInsurance}
+                className="flex items-center gap-1 text-xs font-medium text-deep hover:text-ink transition-colors"
+              >
+                Open <ExternalLink className="w-3.5 h-3.5" strokeWidth={1.75} />
+              </button>
+            </div>
+          </div>
           </div>
         </div>
 

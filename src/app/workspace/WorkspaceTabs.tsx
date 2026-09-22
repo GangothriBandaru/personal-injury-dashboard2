@@ -7,6 +7,7 @@ import {
   HeartPulse, ClipboardList, Image as ImageIcon, Video, FileSignature, Quote,
   Pencil, RotateCcw, History, TrendingUp, TrendingDown, Info, Shield, Circle, Loader2, Bot, Send,
   Plus, UserPlus, Receipt, Trash2, Check,
+  ArrowUpRight,
 } from "lucide-react";
 import type { AnalysisFinding, CaseDocument } from "../types/case";
 import { classifyDocuments } from "../types/case";
@@ -68,6 +69,8 @@ interface TabProps {
   goTo: (tab: string) => void;
   goToValuation?: () => void;
   onGenerateDemand?: (strategyLabel: string, amount: number) => void;
+  /** Opens the case's Insurance Policy Analysis — the shared insurance pages. */
+  onOpenInsurance?: () => void;
 }
 
 function formatUSD(n: number) {
@@ -173,15 +176,38 @@ function Section({ title, description, children }: { title: string; description?
 
 // Compact information tile: outline icon, uppercase muted label, bold value.
 // `wide` spans the full grid width; `big` enlarges the value for emphasis.
-function InfoTile({ icon: Icon, label, value, wide, big }: { icon: any; label: string; value: string; wide?: boolean; big?: boolean }) {
-  return (
-    <div className={`rounded-xl border border-line bg-offwhite p-3 ${wide ? "col-span-2" : ""}`}>
+function InfoTile({ icon: Icon, label, value, wide, big, onClick, hint }: {
+  icon: any; label: string; value: string; wide?: boolean; big?: boolean;
+  /** Makes the tile a link; it looks the same until hovered. */
+  onClick?: () => void;
+  hint?: string;
+}) {
+  const body = (
+    <>
       <div className="flex items-center gap-1.5 mb-1.5">
         <Icon className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
         <span className="eyebrow truncate">{label}</span>
       </div>
+      {/* Sits in the corner padding so it never takes room from the label. */}
+      {onClick && (
+        <ArrowUpRight className="absolute top-1.5 right-1.5 w-3 h-3 text-deep opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity" strokeWidth={2} />
+      )}
       <div className={`font-semibold text-ink leading-snug break-words ${big ? "text-xl tabular-nums" : "text-sm"}`}>{value}</div>
-    </div>
+    </>
+  );
+  if (!onClick) {
+    return <div className={`rounded-xl border border-line bg-offwhite p-3 ${wide ? "col-span-2" : ""}`}>{body}</div>;
+  }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={hint}
+      aria-label={hint ? `${label}: ${value}. ${hint}` : undefined}
+      className={`group relative text-left rounded-xl border border-line bg-offwhite p-3 cursor-pointer transition-all hover:border-soft hover:bg-wash hover:shadow-sm active:scale-[0.99] ${wide ? "col-span-2" : ""}`}
+    >
+      {body}
+    </button>
   );
 }
 
@@ -255,7 +281,7 @@ const KEY_FINDINGS: { title: string; kind: "strength" | "risk"; description: str
   },
 ];
 
-export function OverviewTab({ model, documents, goTo }: TabProps) {
+export function OverviewTab({ model, documents, goTo, onOpenInsurance }: TabProps) {
   const [bioOpen, setBioOpen] = useState(false);
 
   // Shared Document Workspace state (reused from the Analysis stage). Each finding
@@ -331,7 +357,13 @@ export function OverviewTab({ model, documents, goTo }: TabProps) {
               )}
             </div>
             <InfoTile icon={Building2} label="Defendant" value={model.defendant} />
-            <InfoTile icon={ShieldCheck} label="Insurance Carrier" value={model.insuranceCarrier} />
+            <InfoTile
+              icon={ShieldCheck}
+              label="Insurance Carrier"
+              value={model.insuranceCarrier}
+              onClick={onOpenInsurance}
+              hint="Open Insurance Policy Analysis"
+            />
             <InfoTile icon={MapPin} label="Jurisdiction" value={model.jurisdiction} />
             <InfoTile icon={Hash} label="Case ID" value={model.caseId} />
             <InfoTile icon={Scale} label="Case Type" value={model.caseType} />
