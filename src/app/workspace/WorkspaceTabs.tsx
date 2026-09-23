@@ -5558,9 +5558,9 @@ export function LiabilityAnalysisTab({ goTo, documents }: TabProps) {
   return (
     <>
     <div className="w-full">
-      <div className="w-full flex flex-col lg:flex-row-reverse gap-6 items-start">
-      {/* RIGHT — Applicable Legal Framework (sticky sidebar, ~32%) */}
-      <aside className="w-full lg:w-[32%] shrink-0 lg:sticky lg:top-[176px] self-start">
+      <div className="grid grid-cols-1 lg:grid-cols-[31fr_69fr] gap-6 items-start">
+      {/* LEFT — Applicable Legal Framework (sticky, ~31%) */}
+      <aside className="min-w-0 lg:sticky lg:top-[176px] self-start">
         <div className="lg-card p-6 space-y-5">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-full bg-tint border border-line flex items-center justify-center shrink-0">
@@ -5621,10 +5621,11 @@ export function LiabilityAnalysisTab({ goTo, documents }: TabProps) {
         </div>
       </aside>
 
-      {/* RIGHT — Violation cards inside an off-white container (~68%) */}
-      <div className="flex-1 min-w-0">
-        <div className="lg-card bg-offwhite p-6 space-y-4">
-        <div className="flex items-center justify-between gap-3">
+      {/* RIGHT — Violation cards (~69%). The heading stays put; the cards
+          scroll in their own area so the framework on the left never moves. */}
+      <div className="min-w-0 lg:sticky lg:top-[176px] self-start">
+        <div className="lg-card bg-offwhite p-6 flex flex-col lg:max-h-[calc(100vh-200px)]">
+        <div className="flex items-center justify-between gap-3 mb-4 shrink-0">
           <h2 className="page-title" style={{ fontSize: "24px" }}>Violations</h2>
           {violationStore && !addingViolation && (
             <button
@@ -5635,6 +5636,7 @@ export function LiabilityAnalysisTab({ goTo, documents }: TabProps) {
             </button>
           )}
         </div>
+        <div className="space-y-4 lg:overflow-y-auto lg:min-h-0 lg:-mr-3 lg:pr-3">
         {addingViolation && violationStore && (
           <div className="lg-card p-6">
             <ViolationForm
@@ -5675,11 +5677,13 @@ export function LiabilityAnalysisTab({ goTo, documents }: TabProps) {
           }
 
           return (
-            <div key={v.id} className="lg-card p-6 space-y-4">
-              {/* Header — title + severity + description */}
-              <div>
-                <div className="flex items-center gap-3 flex-wrap">
-                  <Gavel className="w-5 h-5 text-deep shrink-0" strokeWidth={1.75} />
+            <div key={v.id} className="lg-card">
+              {/* Header — icon, title, severity and Edit on one scannable line */}
+              <div className="px-6 pt-5 pb-4 flex items-start gap-3.5">
+                <div className="w-10 h-10 rounded-xl bg-tint border border-line flex items-center justify-center shrink-0">
+                  <Gavel className="w-5 h-5 text-deep" strokeWidth={1.75} />
+                </div>
+                <div className="min-w-0 flex-1 flex items-center gap-2 flex-wrap pt-1.5">
                   <h3 className="text-xl font-semibold text-ink leading-tight tracking-tight">{v.title}</h3>
                   <span className={VIOLATION_SEVERITY_PILL[v.severity]}>{v.severity}</span>
                   {changed && (
@@ -5690,148 +5694,151 @@ export function LiabilityAnalysisTab({ goTo, documents }: TabProps) {
                       {VIOLATION_PROVENANCE_LABEL[v.provenance]}
                     </span>
                   )}
-                  {violationStore && (
-                    <button
-                      onClick={() => { setAddingViolation(false); setViolationDraft(violationDraftOf(v)); setEditingViolation(v.id); }}
-                      title="Edit violation"
-                      aria-label={`Edit ${v.title}`}
-                      className="ml-auto inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-semibold text-[#8A98A3] hover:bg-tint hover:text-deep transition-colors shrink-0"
-                    >
-                      <Pencil className="w-3.5 h-3.5" strokeWidth={1.75} /> Edit
-                    </button>
-                  )}
                 </div>
-                <p className="body-text leading-relaxed mt-2">{v.description}</p>
-                {/* The AI read the wording as it was. Once it is rewritten by
-                    hand, its summary and confidence are stale and say so. */}
-                {v.aiStale && (
-                  <div className="mt-3 flex items-start gap-1.5 rounded-lg border border-[#FDE6C8] bg-[#FFF7ED] px-2.5 py-2">
-                    <AlertTriangle className="w-3.5 h-3.5 text-[#B45309] shrink-0 mt-0.5" strokeWidth={1.75} />
-                    <p className="text-[11px] text-[#B45309] leading-relaxed">
-                      This violation has been edited since the AI analysed it. The AI summary and confidence below may be out of date.
-                    </p>
-                  </div>
+                {violationStore && (
+                  <button
+                    onClick={() => { setAddingViolation(false); setViolationDraft(violationDraftOf(v)); setEditingViolation(v.id); }}
+                    title="Edit violation"
+                    aria-label={`Edit ${v.title}`}
+                    className="inline-flex items-center gap-1.5 px-2 py-1 mt-1 rounded-lg text-xs font-semibold text-[#8A98A3] hover:bg-tint hover:text-deep transition-colors shrink-0"
+                  >
+                    <Pencil className="w-3.5 h-3.5" strokeWidth={1.75} /> Edit
+                  </button>
                 )}
               </div>
 
-              {/* Meta row — Location | Supporting Documents | Applied Legal Statute, divided */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 border-y border-line divide-y sm:divide-y-0 sm:divide-x divide-line">
-                {/* Location */}
-                <div className="py-4 sm:pr-5">
-                  <div className="flex items-center gap-1.5 eyebrow mb-1">
-                    <MapPin className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} /> Location
-                  </div>
-                  <div className="text-sm font-semibold text-ink">{v.jurisdiction}</div>
-                </div>
-
-                {/* Supporting Documents */}
-                <div className="py-4 sm:px-5">
-                  <div className="eyebrow mb-1">Supporting Documents ({v.evidence.length})</div>
-                  <div className="flex items-center gap-2.5 flex-wrap">
-                    <span className="flex items-center gap-1.5 min-w-0">
-                      <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
-                      <span className="mono-ref">{v.evidence[0]}</span>
-                    </span>
-                    {v.evidence.length > 1 && (
-                      <button
-                        onClick={() => toggleId(setDocsOpen, v.id)}
-                        className="inline-flex items-center gap-1 text-sm font-medium text-deep hover:text-ink transition-colors"
-                      >
-                        {docsShown ? "Show less" : `+${v.evidence.length - 1} More`}
-                        <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${docsShown ? "rotate-180" : ""}`} strokeWidth={1.75} />
-                      </button>
-                    )}
-                  </div>
-                  {docsShown && v.evidence.length > 1 && (
-                    <div className="space-y-2 mt-2">
-                      {v.evidence.slice(1).map((doc) => (
-                        <div key={doc} className="flex items-center gap-2.5 rounded-lg bg-white border border-line px-3 py-2">
-                          <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} /><span className="mono-ref">{doc}</span>
-                        </div>
-                      ))}
+              {/* Body — description on the left, the violation's facts on the right */}
+              <div className="px-6 pb-5 grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_280px] gap-5">
+                <div className="min-w-0">
+                  <p className="body-text leading-relaxed">{v.description}</p>
+                  {/* The AI read the wording as it was. Once it is rewritten by
+                      hand, its summary and confidence are stale and say so. */}
+                  {v.aiStale && (
+                    <div className="mt-3 flex items-start gap-1.5 rounded-lg border border-[#FDE6C8] bg-[#FFF7ED] px-2.5 py-2">
+                      <AlertTriangle className="w-3.5 h-3.5 text-[#B45309] shrink-0 mt-0.5" strokeWidth={1.75} />
+                      <p className="text-[11px] text-[#B45309] leading-relaxed">
+                        This violation has been edited since the AI analysed it. The AI summary and confidence below may be out of date.
+                      </p>
                     </div>
                   )}
                 </div>
 
-                {/* Applied Legal Statute — statute code only; click to expand reasoning */}
-                <div className="py-4 sm:px-5">
-                  <div className="eyebrow mb-1">Applied Legal Statute</div>
-                  <button
-                    onClick={() => toggleId(setStatuteOpen, v.id)}
-                    aria-expanded={statuteShown}
-                    className="flex items-center gap-1.5 text-sm font-semibold text-ink hover:text-deep transition-colors"
-                  >
-                    <Gavel className="w-4 h-4 text-deep shrink-0" strokeWidth={1.75} />
-                    {v.statute.split(" — ")[0]}
-                    <ChevronDown className={`w-4 h-4 text-[#5B6B78] shrink-0 transition-transform duration-200 ${statuteShown ? "rotate-180" : ""}`} strokeWidth={1.75} />
-                  </button>
+                {/* Facts — Location, Applied Legal Statute, Supporting Documents */}
+                <div className="lg-zone p-4 min-w-0 divide-y divide-[#DCEEF4] self-start">
+                  <div className="pb-3">
+                    <div className="flex items-center gap-1.5 eyebrow mb-1">
+                      <MapPin className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} /> Location
+                    </div>
+                    <div className="text-sm font-semibold text-ink leading-snug">{v.jurisdiction}</div>
+                  </div>
+
+                  {/* Applied Legal Statute — statute code only; click to expand reasoning */}
+                  <div className="py-3">
+                    <div className="eyebrow mb-1">Applied Legal Statute</div>
+                    <button
+                      onClick={() => toggleId(setStatuteOpen, v.id)}
+                      aria-expanded={statuteShown}
+                      className="flex items-center gap-1.5 text-sm font-semibold text-ink hover:text-deep transition-colors text-left"
+                    >
+                      <Gavel className="w-4 h-4 text-deep shrink-0" strokeWidth={1.75} />
+                      {v.statute.split(" — ")[0]}
+                      <ChevronDown className={`w-4 h-4 text-[#5B6B78] shrink-0 transition-transform duration-200 ${statuteShown ? "rotate-180" : ""}`} strokeWidth={1.75} />
+                    </button>
+                  </div>
+
+                  {/* Supporting Documents */}
+                  <div className="pt-3">
+                    <div className="eyebrow mb-1">Supporting Documents ({v.evidence.length})</div>
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <span className="flex items-center gap-1.5 min-w-0 max-w-full">
+                        <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+                        <span className="mono-ref truncate" title={v.evidence[0]}>{v.evidence[0]}</span>
+                      </span>
+                      {v.evidence.length > 1 && (
+                        <button
+                          onClick={() => toggleId(setDocsOpen, v.id)}
+                          className="inline-flex items-center gap-1 text-sm font-medium text-deep hover:text-ink transition-colors"
+                        >
+                          {docsShown ? "Show less" : `+${v.evidence.length - 1} More`}
+                          <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${docsShown ? "rotate-180" : ""}`} strokeWidth={1.75} />
+                        </button>
+                      )}
+                    </div>
+                    {docsShown && v.evidence.length > 1 && (
+                      <div className="space-y-2 mt-2">
+                        {v.evidence.slice(1).map((doc) => (
+                          <div key={doc} className="flex items-center gap-2.5 rounded-lg bg-white border border-line px-3 py-2 min-w-0">
+                            <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} /><span className="mono-ref truncate" title={doc}>{doc}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 
               {/* Applied Legal Statute — expanded reasoning */}
               {statuteShown && (
-                <div className="rounded-xl border border-line p-4 space-y-3 bg-offwhite">
-                  <div className="rounded-lg bg-[#F6FDFF] border border-[#D6F2F7] p-3.5">
-                    <div className="flex items-center gap-2 mb-1"><Sparkles className="w-4 h-4 text-deep" strokeWidth={1.75} /><span className="eyebrow text-deep">AI Summary</span></div>
-                    <p className="secondary-text">{v.aiSummary}</p>
-                  </div>
-                  <div>
-                    <div className="eyebrow mb-1">Why This Statute Applies</div>
-                    <p className="secondary-text">{v.whyApplied}</p>
-                  </div>
-                  <div className="flex items-center justify-between rounded-lg border border-line bg-white px-3.5 py-2.5">
-                    <div className="flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-deep" strokeWidth={1.75} /><span className="eyebrow">Confidence Score</span></div>
-                    <span className="text-sm font-bold text-ink tabular-nums">{v.confidence}%</span>
+                <div className="px-6 pb-5">
+                  <div className="rounded-xl border border-line p-4 space-y-3 bg-offwhite">
+                    <div className="rounded-lg bg-[#F6FDFF] border border-[#D6F2F7] p-3.5">
+                      <div className="flex items-center gap-2 mb-1"><Sparkles className="w-4 h-4 text-deep" strokeWidth={1.75} /><span className="eyebrow text-deep">AI Summary</span></div>
+                      <p className="secondary-text">{v.aiSummary}</p>
+                    </div>
+                    <div>
+                      <div className="eyebrow mb-1">Why This Statute Applies</div>
+                      <p className="secondary-text">{v.whyApplied}</p>
+                    </div>
+                    <div className="flex items-center justify-between rounded-lg border border-line bg-white px-3.5 py-2.5">
+                      <div className="flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-deep" strokeWidth={1.75} /><span className="eyebrow">Confidence Score</span></div>
+                      <span className="text-sm font-bold text-ink tabular-nums">{v.confidence}%</span>
+                    </div>
                   </div>
                 </div>
               )}
 
-              {/* Similar Statutes — collapsed by default */}
-              <div className="rounded-xl border border-line overflow-hidden">
+              {/* Footer — Similar Statutes on the left, Preview / Insights on the right */}
+              <div className="border-t border-line px-6 py-4 flex flex-wrap items-center justify-between gap-3">
                 <button
                   onClick={() => toggleId(setSimilarOpen, v.id)}
                   aria-expanded={similarShown}
-                  className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-wash transition-colors"
+                  className="inline-flex items-center gap-2 text-sm font-medium text-deep hover:text-ink transition-colors text-left"
                 >
-                  <span className="flex items-center gap-2 text-sm font-medium text-deep">
-                    <Scale className="w-4 h-4 shrink-0" strokeWidth={1.75} /> Want to see similar statutes considered?
-                  </span>
+                  <Scale className="w-4 h-4 shrink-0" strokeWidth={1.75} /> Want to see similar statutes considered?
                   <ChevronDown className={`w-4 h-4 text-[#5B6B78] shrink-0 transition-transform duration-200 ${similarShown ? "" : "-rotate-90"}`} strokeWidth={1.75} />
                 </button>
-                {similarShown && (
-                  <div className="border-t border-line p-4 space-y-2 bg-offwhite">
-                    {v.similar.map((s) => (
-                      <div key={s.name} className="rounded-lg border border-line bg-white p-3.5">
-                        <div className="flex items-center gap-2 text-sm font-semibold text-ink mb-1.5"><Scale className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />{s.name}</div>
-                        <p className="secondary-text mb-1"><span className="font-medium text-ink">Considered:</span> {s.reasonConsidered}</p>
-                        <p className="secondary-text"><span className="font-medium text-ink">Not selected:</span> {s.whyNot}</p>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => openViolation(i, "preview")}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-white border border-line text-deep text-sm font-medium hover:bg-wash transition-all"
+                  >
+                    <Eye className="w-4 h-4" strokeWidth={1.75} /> Preview Evidence
+                  </button>
+                  <button
+                    onClick={() => openViolation(i, "insights")}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-brand hover:bg-deep text-white text-sm font-semibold transition-all"
+                  >
+                    <Sparkles className="w-4 h-4" strokeWidth={1.75} /> View Insights
+                  </button>
+                </div>
               </div>
 
-              {/* Divider between similar statutes and actions */}
-              <div className="border-t border-line" />
-
-              {/* Actions — open the shared Document Workspace (Preview / Insights) */}
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => openViolation(i, "preview")}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-white border border-line text-deep text-sm font-medium hover:bg-wash transition-all"
-                >
-                  <Eye className="w-4 h-4" strokeWidth={1.75} /> Preview Evidence
-                </button>
-                <button
-                  onClick={() => openViolation(i, "insights")}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-brand hover:bg-deep text-white text-sm font-semibold transition-all"
-                >
-                  <Sparkles className="w-4 h-4" strokeWidth={1.75} /> View Insights
-                </button>
-              </div>
+              {/* Similar Statutes — collapsed by default */}
+              {similarShown && (
+                <div className="border-t border-line p-4 space-y-2 bg-offwhite rounded-b-[14px]">
+                  {v.similar.map((s) => (
+                    <div key={s.name} className="rounded-lg border border-line bg-white p-3.5">
+                      <div className="flex items-center gap-2 text-sm font-semibold text-ink mb-1.5"><Scale className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />{s.name}</div>
+                      <p className="secondary-text mb-1"><span className="font-medium text-ink">Considered:</span> {s.reasonConsidered}</p>
+                      <p className="secondary-text"><span className="font-medium text-ink">Not selected:</span> {s.whyNot}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           );
         })}
+        </div>
         </div>
       </div>
       </div>
