@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, ReactNode } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, ReactNode } from "react";
 import {
   Scale, MapPin, CheckCircle, ShieldCheck, User, Building2, Hash, Calendar, AlertTriangle, X,
   FileText, Activity, Stethoscope, DollarSign, Sparkles,
@@ -5555,12 +5555,42 @@ export function LiabilityAnalysisTab({ goTo, documents }: TabProps) {
   const severityCells = ([["Critical", counts.Critical], ["High", counts.High], ["Medium", counts.Medium], ["Low", counts.Low]] as const)
     .filter(([label, n]) => label !== "Low" || n > 0);
 
+  // ── Two-panel workspace ──────────────────────────────────────────────────
+  // On desktop the stage fills the height left beneath the case header, so the
+  // framework stays in view and only the violation list scrolls. The page
+  // scrolls inside <main>, not the window, so that is what gets measured.
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const [panelHeight, setPanelHeight] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const el = workspaceRef.current;
+    if (!el) return;
+    const scroller = (el.closest("main") as HTMLElement | null) ?? document.documentElement;
+    const wide = window.matchMedia("(min-width: 1024px)");
+    const measure = () => {
+      if (!wide.matches) { setPanelHeight(null); return; }
+      // Where the workspace starts within the page, independent of how far
+      // the page happens to be scrolled right now.
+      const top = el.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+      setPanelHeight(Math.max(scroller.clientHeight - top - 24, 480));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(scroller);
+    wide.addEventListener("change", measure);
+    return () => { ro.disconnect(); wide.removeEventListener("change", measure); };
+  }, []);
+
   return (
     <>
     <div className="w-full">
-      <div className="grid grid-cols-1 lg:grid-cols-[31fr_69fr] gap-6 items-start">
-      {/* LEFT — Applicable Legal Framework (sticky, ~31%) */}
-      <aside className="min-w-0 lg:sticky lg:top-[176px] self-start">
+      <div
+        ref={workspaceRef}
+        className="grid grid-cols-1 lg:grid-cols-[31fr_69fr] gap-6 items-start lg:items-stretch"
+        style={panelHeight ? { height: panelHeight } : undefined}
+      >
+      {/* LEFT — Applicable Legal Framework (static, ~31%). Scrolls on its own
+          only if a short window cannot fit it. */}
+      <aside className="min-w-0 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain">
         <div className="lg-card p-6 space-y-5">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-full bg-tint border border-line flex items-center justify-center shrink-0">
@@ -5621,10 +5651,10 @@ export function LiabilityAnalysisTab({ goTo, documents }: TabProps) {
         </div>
       </aside>
 
-      {/* RIGHT — Violation cards (~69%). The heading stays put; the cards
-          scroll in their own area so the framework on the left never moves. */}
-      <div className="min-w-0 lg:sticky lg:top-[176px] self-start">
-        <div className="lg-card bg-offwhite p-6 flex flex-col lg:max-h-[calc(100vh-200px)]">
+      {/* RIGHT — Violation cards (~69%). The heading stays put; only the list
+          of cards scrolls, and reaching its end does not scroll the page. */}
+      <div className="min-w-0 lg:min-h-0">
+        <div className="lg-card bg-offwhite p-6 flex flex-col lg:h-full">
         <div className="flex items-center justify-between gap-3 mb-4 shrink-0">
           <h2 className="page-title" style={{ fontSize: "24px" }}>Violations</h2>
           {violationStore && !addingViolation && (
@@ -5636,7 +5666,7 @@ export function LiabilityAnalysisTab({ goTo, documents }: TabProps) {
             </button>
           )}
         </div>
-        <div className="space-y-4 lg:overflow-y-auto lg:min-h-0 lg:-mr-3 lg:pr-3">
+        <div className="space-y-4 lg:flex-1 lg:overflow-y-auto lg:overscroll-contain lg:min-h-0 lg:-mr-3 lg:pr-3">
         {addingViolation && violationStore && (
           <div className="lg-card p-6">
             <ViolationForm
