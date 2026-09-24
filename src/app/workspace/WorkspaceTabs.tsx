@@ -5708,7 +5708,7 @@ export function LiabilityAnalysisTab({ goTo, documents }: TabProps) {
               </div>
 
               {/* Body — description on the left, the violation's facts on the right */}
-              <div className="px-5 pb-4 grid grid-cols-1 @xl:grid-cols-[minmax(0,1fr)_230px] gap-3 @xl:gap-5">
+              <div className="px-5 pb-3.5 space-y-3">
                 <div className="min-w-0">
                   <p className="body-text leading-relaxed">{v.description}</p>
                   {/* The AI read the wording as it was. Once it is rewritten by
@@ -5723,11 +5723,11 @@ export function LiabilityAnalysisTab({ goTo, documents }: TabProps) {
                   )}
                 </div>
 
-                {/* Metadata — Location, Applied Legal Statute, Supporting Documents.
-                    Beside the description on a wide card (set off by a thin tinted
-                    rule); on a narrow one, a single row beneath it. */}
-                <div className="min-w-0 self-start grid grid-cols-1 @md:grid-cols-3 @xl:grid-cols-1 gap-x-4 gap-y-2.5 border-t border-[#DCEEF4] pt-3 @xl:border-t-0 @xl:pt-0 @xl:border-l @xl:pl-4">
-                  <div className="min-w-0">
+                {/* Metadata — Location | Applied Legal Statute | Supporting Documents
+                    in one row of three balanced columns under the description.
+                    Only a very narrow card stacks them. */}
+                <div className="grid grid-cols-1 @md:grid-cols-3 gap-y-2 border-t border-[#DCEEF4] pt-3 @md:divide-x @md:divide-[#DCEEF4]">
+                  <div className="min-w-0 @md:pr-4">
                     <div className="flex items-center gap-1.5 eyebrow mb-0.5">
                       <MapPin className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} /> Location
                     </div>
@@ -5735,7 +5735,7 @@ export function LiabilityAnalysisTab({ goTo, documents }: TabProps) {
                   </div>
 
                   {/* Applied Legal Statute — statute code only; click to expand reasoning */}
-                  <div className="min-w-0">
+                  <div className="min-w-0 @md:px-4">
                     <div className="flex items-center gap-1.5 eyebrow mb-0.5">
                       <Gavel className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} /> Applied Legal Statute
                     </div>
@@ -5750,7 +5750,7 @@ export function LiabilityAnalysisTab({ goTo, documents }: TabProps) {
                   </div>
 
                   {/* Supporting Documents */}
-                  <div className="min-w-0">
+                  <div className="min-w-0 @md:pl-4">
                     <div className="flex items-center gap-1.5 eyebrow mb-0.5">
                       <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} /> Supporting Documents ({v.evidence.length})
                     </div>
