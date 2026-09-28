@@ -43,18 +43,20 @@ export const TONE_PANEL: Record<Tone, string> = {
 };
 
 // The breadcrumb bar every Case Intake page carries: a back action on the left,
-// the trail on the right.
+// the trail on the right. Inside the Case Workspace it sits in the page content,
+// under the workspace's own sticky header, rather than as a second sticky bar.
 export function InsuranceBreadcrumb({
-  backLabel, onBack, trail,
+  backLabel, onBack, trail, embedded = false,
 }: {
   backLabel: string;
   onBack: () => void;
   /** The trail, left to right. Every entry but the last is a link. */
   trail: { label: string; onClick?: () => void }[];
+  embedded?: boolean;
 }) {
   return (
-    <div className="bg-white sticky top-0 z-40">
-      <div className="max-w-[1400px] mx-auto px-8 py-4">
+    <div className={embedded ? "" : "bg-white sticky top-0 z-40"}>
+      <div className={embedded ? "" : "max-w-[1400px] mx-auto px-8 py-4"}>
         <div className="flex items-center gap-4">
           <button onClick={onBack} className="flex items-center gap-2 secondary-text hover:text-ink transition-colors">
             <ChevronLeft className="w-4 h-4" strokeWidth={1.75} />

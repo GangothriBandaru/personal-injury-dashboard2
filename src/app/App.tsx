@@ -83,26 +83,20 @@ export default function App() {
   const [returnToSection, setReturnToSection] = useState<string | undefined>(undefined);
   // The insurance pages are shared by Analysis and Case Ready; this is the
   // stage they were opened from, and the one they return to.
-  const [insuranceOrigin, setInsuranceOrigin] = useState<"analysis" | "case-ready" | "workspace">("analysis");
+  // (The Case Workspace shows the same pages as its own Insurance stage.)
+  const [insuranceOrigin, setInsuranceOrigin] = useState<"analysis" | "case-ready">("analysis");
   const openInsurancePage = (page: "insurance" | "insurance-detail") => setActivePage(page);
-  const openInsuranceFrom = (origin: "analysis" | "case-ready" | "workspace") => {
+  const openInsuranceFrom = (origin: "analysis" | "case-ready") => {
     setInsuranceOrigin(origin);
     setActivePage("insurance");
   };
   const backToInsuranceOrigin = () => {
-    if (insuranceOrigin === "workspace") {
-      // The workspace reopens on Case Overview, where the carrier tile sits at the top.
-      setActivePage("workspace");
-      setTimeout(() => document.querySelector("main")?.scrollTo(0, 0), 0);
-      return;
-    }
     setReturnToSection(insuranceOrigin === "case-ready" ? "insurance-deliverable" : "insurance-analysis");
     setActivePage(insuranceOrigin);
   };
   const INSURANCE_BACK_LABEL = {
     analysis: "Back to Analysis",
     "case-ready": "Back to Case Ready",
-    workspace: "Back to Case Overview",
   } as const;
   // A return target applies to that one return only.
   useEffect(() => {
@@ -246,7 +240,6 @@ export default function App() {
             documents={pipeline.documents}
             onBackToIntake={() => setActivePage("intake")}
             onNavigateToValuation={() => setActivePage("valuation")}
-            onOpenInsurance={() => openInsuranceFrom("workspace")}
           />
         );
       case "intake":

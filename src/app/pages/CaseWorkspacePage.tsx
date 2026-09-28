@@ -16,6 +16,8 @@ import { useDamagesOptional } from "../damages/DamagesContext";
 import { DocumentWorkspaceModal } from "../components/DocumentWorkspace";
 import { DemandSpacePage } from "./DemandSpacePage";
 import { DemandPackageEditorPage } from "./DemandPackageEditorPage";
+import { InsuranceSummaryPage } from "./InsuranceSummaryPage";
+import { InsuranceDetailPage } from "./InsuranceDetailPage";
 
 interface CaseWorkspacePageProps {
   caseData?: any;
@@ -23,8 +25,6 @@ interface CaseWorkspacePageProps {
   documents?: CaseDocument[];
   onBackToIntake?: () => void;
   onNavigateToValuation?: () => void;
-  /** Opens the case's Insurance Policy Analysis (from the Case Snapshot carrier tile). */
-  onOpenInsurance?: () => void;
 }
 
 // The workflow stages, numbered in order. Evidence is not among them: it is a
@@ -32,6 +32,7 @@ interface CaseWorkspacePageProps {
 // step they work through once.
 const TABS = [
   { id: "overview", label: "Case Overview" },
+  { id: "insurance", label: "Insurance" },
   { id: "medical", label: "Chronology" },
   { id: "economic", label: "Damages Analysis" },
   { id: "noneconomic", label: "Negligence" },
@@ -44,10 +45,15 @@ const TABS = [
 // The Evidence workspace, opened from the header rather than the stage bar.
 const EVIDENCE_VIEW = "evidencehub";
 
+// The Insurance stage: the Insurance Policy Analysis summary, with its Full
+// Detailed Analysis opened from it in place.
+const INSURANCE_STAGE = "insurance";
+
 // Stages that close with a stage-specific Evidence section. The Evidence
 // workspace itself is excluded — it is the evidence surface, so a summary of its
-// own evidence at the bottom would be circular.
-const STAGE_IDS = [...TABS.map((t) => t.id), EVIDENCE_VIEW].filter((id) => id !== EVIDENCE_VIEW) as StageId[];
+// own evidence at the bottom would be circular. Insurance is excluded too: the
+// policy document it reads is already the first thing its page shows.
+const STAGE_IDS = TABS.map((t) => t.id).filter((id) => id !== EVIDENCE_VIEW && id !== INSURANCE_STAGE) as StageId[];
 // Stages laid out at max-w-4xl — the Evidence section matches their width.
 const NARROW_STAGES: StageId[] = ["evidence", "negotiation"];
 // Anchor for each stage's own Evidence section, targeted by its View Evidence
@@ -79,8 +85,22 @@ const GENERATE_STEPS = [
   "Generating demand letter...",
 ];
 
-export function CaseWorkspacePage({ caseData, analysisFindings = [], documents = [], onBackToIntake, onNavigateToValuation, onOpenInsurance }: CaseWorkspacePageProps) {
+export function CaseWorkspacePage({ caseData, analysisFindings = [], documents = [], onBackToIntake, onNavigateToValuation }: CaseWorkspacePageProps) {
   const [activeTab, setActiveTab] = useState("overview");
+
+  // Which Insurance page is open. Entering the stage always lands on the
+  // summary; the detailed analysis is one step in from there.
+  const [insuranceDetail, setInsuranceDetail] = useState(false);
+  const scrollWorkspaceTop = () => setTimeout(() => document.querySelector("main")?.scrollTo(0, 0), 0);
+  const openInsurance = (detail = false) => {
+    setInsuranceDetail(detail);
+    setActiveTab(INSURANCE_STAGE);
+    scrollWorkspaceTop();
+  };
+  const openTab = (id: string) => {
+    if (id === INSURANCE_STAGE) openInsurance();
+    else setActiveTab(id);
+  };
   // The stage to return to when leaving the Evidence workspace, so the header
   // action behaves like opening a resource rather than navigating away.
   const [lastStage, setLastStage] = useState("overview");
@@ -211,7 +231,9 @@ export function CaseWorkspacePage({ caseData, analysisFindings = [], documents =
     estimatedHigh: caseData?.estimatedHigh ?? 1372325,
   };
 
-  const tabProps = { model, findings: analysisFindings, documents, goTo: setActiveTab, goToValuation: onNavigateToValuation, onGenerateDemand: startGenerateDemand, onOpenInsurance };
+  // The Case Overview carrier tile opens the Insurance stage.
+  const tabProps = { model, findings: analysisFindings, documents, goTo: openTab, goToValuation: onNavigateToValuation, onGenerateDemand: startGenerateDemand, onOpenInsurance: () => openInsurance() };
+  const backToOverview = () => { setActiveTab("overview"); scrollWorkspaceTop(); };
 
   const renderTab = () => {
     switch (activeTab) {
@@ -222,6 +244,24 @@ export function CaseWorkspacePage({ caseData, analysisFindings = [], documents =
           onAddChronology={(kind, ev) =>
             setUserChronology((prev) => ({ ...prev, [kind]: [...prev[kind], ev] }))
           }
+        />
+      );
+      case INSURANCE_STAGE: return insuranceDetail ? (
+        <InsuranceDetailPage
+          embedded
+          caseName={model.caseName}
+          onBack={() => openInsurance(false)}
+          onBackToAnalysis={backToOverview}
+        />
+      ) : (
+        <InsuranceSummaryPage
+          embedded
+          caseName={model.caseName}
+          caseData={{ caseType: model.caseType, caseSubType: caseData?.caseSubType }}
+          documents={documents}
+          backLabel="Back to Case Overview"
+          onBack={backToOverview}
+          onOpenDetail={() => openInsurance(true)}
         />
       );
       case "economic": return <EconomicDamagesTab {...tabProps} />;
@@ -316,7 +356,7 @@ export function CaseWorkspacePage({ caseData, analysisFindings = [], documents =
               return (
                 <button
                   key={t.id}
-                  onClick={() => setActiveTab(t.id)}
+                  onClick={() => openTab(t.id)}
                   className={`relative px-4 py-3.5 text-xs font-semibold uppercase tracking-[0.08em] whitespace-nowrap transition-colors ${
                     active ? "text-brand" : "text-[#5B6B78] hover:text-ink"
                   }`}

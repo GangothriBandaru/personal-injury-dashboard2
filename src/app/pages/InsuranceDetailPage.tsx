@@ -114,16 +114,19 @@ function PanelCard({ panel }: { panel: Panel }) {
 }
 
 export function InsuranceDetailPage({
-  caseName, onBack, onBackToAnalysis,
+  caseName, onBack, onBackToAnalysis, embedded = false,
 }: {
   caseName: string;
+  /** Rendered as the Case Workspace's Insurance stage, inside its layout. */
+  embedded?: boolean;
   /** Back to the insurance summary. */
   onBack: () => void;
   onBackToAnalysis: () => void;
 }) {
   return (
-    <div className="min-h-screen bg-wash">
+    <div className={embedded ? "space-y-6" : "min-h-screen bg-wash"}>
       <InsuranceBreadcrumb
+        embedded={embedded}
         backLabel="Back to Insurance Summary"
         onBack={onBack}
         trail={[
@@ -134,7 +137,7 @@ export function InsuranceDetailPage({
         ]}
       />
 
-      <div className="max-w-[1400px] mx-auto px-8 py-8 space-y-6">
+      <div className={embedded ? "space-y-6" : "max-w-[1400px] mx-auto px-8 py-8 space-y-6"}>
         {/* ── Header ── */}
         <div>
           <div className="eyebrow flex items-center gap-1.5 mb-2">

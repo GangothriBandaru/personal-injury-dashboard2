@@ -31,8 +31,10 @@ function Fact({ value }: { value?: string }) {
 }
 
 export function InsuranceSummaryPage({
-  caseName, caseData, documents, backLabel = "Back to Analysis", onBack, onOpenDetail,
+  caseName, caseData, documents, backLabel = "Back to Analysis", onBack, onOpenDetail, embedded = false,
 }: {
+  /** Rendered as the Case Workspace's Insurance stage, inside its layout. */
+  embedded?: boolean;
   caseName: string;
   /** Names the stage the page was opened from (Analysis or Case Ready). */
   backLabel?: string;
@@ -51,8 +53,9 @@ export function InsuranceSummaryPage({
   const ValidityIcon = TONE_ICON[validity.tone];
 
   return (
-    <div className="min-h-screen bg-wash">
+    <div className={embedded ? "space-y-6" : "min-h-screen bg-wash"}>
       <InsuranceBreadcrumb
+        embedded={embedded}
         backLabel={backLabel}
         onBack={onBack}
         trail={[
@@ -62,7 +65,7 @@ export function InsuranceSummaryPage({
         ]}
       />
 
-      <div className="max-w-[1400px] mx-auto px-8 py-8 space-y-6">
+      <div className={embedded ? "space-y-6" : "max-w-[1400px] mx-auto px-8 py-8 space-y-6"}>
         {/* ── Header ── */}
         <div className="flex items-start justify-between gap-6 flex-wrap">
           <div className="min-w-0">
