@@ -26,21 +26,10 @@ export const TONE_TEXT: Record<Tone, string> = {
   info: "text-ink",
 };
 
-// Tone → the icon container the dashboard's summary cards use.
-export const TONE_ICON_WRAP: Record<Tone, string> = {
-  positive: "bg-[#ECFDF3] text-[#15803D]",
-  warning: "bg-[#FFF7ED] text-[#B45309]",
-  critical: "bg-[#FEF2F2] text-[#B91C1C]",
-  info: "bg-tint text-deep",
-};
-
-// Tone → the soft panel those pills use, for callouts and action rows.
-export const TONE_PANEL: Record<Tone, string> = {
-  positive: "bg-[#ECFDF3] border-[#D1FADF]",
-  warning: "bg-[#FFF7ED] border-[#FDE6C8]",
-  critical: "bg-[#FEF2F2] border-[#FBD5D5]",
-  info: "bg-tint border-[#D6F2F7]",
-};
+// The icon container every summary card uses — the dashboard's brand tint, the
+// same for all five so they read as one card system. Tone colours only the
+// figure itself, never the card or its icon.
+const BRAND_ICON_WRAP = "bg-tint text-deep";
 
 // The breadcrumb bar every Case Intake page carries: a back action on the left,
 // the trail on the right. Inside the Case Workspace it sits in the page content,
@@ -103,14 +92,43 @@ const GRID_COLS: Record<number, string> = {
   5: "lg:grid-cols-5",
 };
 
-export function InsuranceSummaryCards({ metrics = INSURANCE_ANALYSIS.metrics }: { metrics?: Metric[] }) {
+export function InsuranceSummaryCards({
+  metrics = INSURANCE_ANALYSIS.metrics, stacked = false,
+}: {
+  metrics?: Metric[];
+  /** A vertical stack of compact cards (icon beside the figure), for a side column. */
+  stacked?: boolean;
+}) {
+  if (stacked) {
+    // Grouped as the Case Intelligence Summary is: one white card holding the
+    // figures as light-gray zones, rather than five separate floating cards.
+    return (
+      <div id="insurance-summary-cards" className="lg-card p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-3">
+        {metrics.map((m) => {
+          const Icon = METRIC_ICON[m.label] ?? Shield;
+          return (
+            <div key={m.label} className="lg-zone lg-zone-grey p-4 flex items-start gap-3">
+              <div className={`p-2 rounded-lg shrink-0 ${BRAND_ICON_WRAP}`}>
+                <Icon className="w-4 h-4" strokeWidth={1.75} />
+              </div>
+              <div className="min-w-0">
+                <div className="eyebrow mb-1">{m.label}</div>
+                <div className={`kpi-value !text-[18px] leading-tight ${TONE_TEXT[m.tone]}`}>{m.value}</div>
+                {m.note && <p className="secondary-text mt-1 leading-snug">{m.note}</p>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
   return (
     <div id="insurance-summary-cards" className={`grid grid-cols-1 sm:grid-cols-2 ${GRID_COLS[metrics.length] ?? "lg:grid-cols-5"} gap-4`}>
       {metrics.map((m) => {
         const Icon = METRIC_ICON[m.label] ?? Shield;
         return (
           <div key={m.label} className="lg-card p-5 flex flex-col">
-            <div className={`p-2.5 rounded-lg self-start mb-4 ${TONE_ICON_WRAP[m.tone]}`}>
+            <div className={`p-2.5 rounded-lg self-start mb-4 ${BRAND_ICON_WRAP}`}>
               <Icon className="w-5 h-5" strokeWidth={1.75} />
             </div>
             <div className="eyebrow mb-2">{m.label}</div>

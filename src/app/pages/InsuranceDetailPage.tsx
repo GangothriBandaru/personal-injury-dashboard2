@@ -4,7 +4,7 @@ import {
 import { INSURANCE_ANALYSIS as IA, type Panel, type Flag, type Tone } from "../insurance/insuranceData";
 import {
   InsuranceBreadcrumb, InsuranceSummaryCards, AttorneyInsight, AttorneyDisclaimer,
-  TONE_PILL, TONE_TEXT, TONE_PANEL,
+  TONE_PILL, TONE_TEXT,
 } from "../insurance/InsuranceShared";
 
 // ── Insurance Policy Analysis — full detailed analysis ────────────────────────
@@ -53,7 +53,9 @@ function FlagCard({ flag }: { flag: Flag }) {
   const tone = critical ? "critical" : "warning";
   const Icon = critical ? AlertCircle : AlertTriangle;
   return (
-    <div className={`rounded-xl border p-4 ${TONE_PANEL[tone]}`}>
+    // A neutral zone like the policy-check tiles; severity is carried by the
+    // icon and the badge, not by a coloured panel.
+    <div className="lg-zone lg-zone-grey p-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="flex items-start gap-2 min-w-0">
           <Icon className={`w-4 h-4 mt-0.5 shrink-0 ${TONE_TEXT[tone]}`} strokeWidth={1.75} />
@@ -62,18 +64,18 @@ function FlagCard({ flag }: { flag: Flag }) {
         <span className={`${TONE_PILL[tone]} shrink-0`}>{flag.severity}</span>
       </div>
       <p className="body-text mt-2 leading-relaxed">{flag.detail}</p>
-      <p className={`text-sm font-semibold mt-2 flex items-start gap-1.5 ${TONE_TEXT[tone]}`}>
+      <p className="text-sm font-semibold mt-2 flex items-start gap-1.5 text-deep">
         <ArrowRight className="w-4 h-4 mt-0.5 shrink-0" strokeWidth={2} /> {flag.action}
       </p>
     </div>
   );
 }
 
-function PanelCard({ panel }: { panel: Panel }) {
+function PanelCard({ panel, embedded = false }: { panel: Panel; embedded?: boolean }) {
   const Icon = PANEL_ICON[panel.no] ?? Shield;
   const status = panelStatus(panel);
   return (
-    <section id={`insurance-panel-${panel.no}`} className="lg-card !p-0 overflow-hidden scroll-mt-[90px]">
+    <section id={`insurance-panel-${panel.no}`} className={`lg-card !p-0 overflow-hidden ${embedded ? "scroll-mt-[190px]" : "scroll-mt-[90px]"}`}>
       <div className="px-6 py-5 border-b border-line flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3 min-w-0">
           <div className="p-2.5 rounded-lg bg-tint text-deep shrink-0">
@@ -147,31 +149,40 @@ export function InsuranceDetailPage({
           <p className="secondary-text mt-1">Analysed {IA.analysedOn} · Six panels, each with an attorney insight.</p>
         </div>
 
-        {/* ── Five figures ── */}
-        <InsuranceSummaryCards />
+        {/* ── Two-column workspace ──
+            Left: the five figures, held in view below whichever header the
+            page sits under (the workspace's, or the standalone breadcrumb).
+            Right: the six panels, which scroll with the page. */}
+        <div className="grid grid-cols-1 lg:grid-cols-[340px_minmax(0,1fr)] gap-6 items-start">
+          <aside className={`min-w-0 lg:sticky ${embedded ? "lg:top-[196px]" : "lg:top-[80px]"}`}>
+            <InsuranceSummaryCards stacked />
+          </aside>
 
-        {/* ── Six panels ── */}
-        {IA.panels.map((p) => <PanelCard key={p.no} panel={p} />)}
+          <div className="min-w-0 space-y-6">
+            {/* ── Six panels ── */}
+            {IA.panels.map((p) => <PanelCard key={p.no} panel={p} embedded={embedded} />)}
 
-        {/* ── Case intake summary ── */}
-        <section id="insurance-intake-summary" className="lg-card !p-0 overflow-hidden">
-          <div className="px-6 py-5 border-b border-line">
-            <h2 className="section-header">Case Intake Summary</h2>
+            {/* ── Case intake summary ── */}
+            <section id="insurance-intake-summary" className="lg-card !p-0 overflow-hidden">
+              <div className="px-6 py-5 border-b border-line">
+                <h2 className="section-header">Case Intake Summary</h2>
+              </div>
+              <ul className="p-6 space-y-2">
+                {IA.intakeSummary.map((s) => (
+                  <li key={s} className="flex items-start gap-2 body-text leading-relaxed">
+                    <CheckCircle className="w-4 h-4 mt-0.5 shrink-0 text-deep" strokeWidth={1.75} /> {s}
+                  </li>
+                ))}
+              </ul>
+            </section>
+
+            <div className="flex justify-start pt-2">
+              <button onClick={onBack} className="btn btn-secondary">Back to Insurance Summary</button>
+            </div>
+
+            <AttorneyDisclaimer />
           </div>
-          <ul className="p-6 space-y-2">
-            {IA.intakeSummary.map((s) => (
-              <li key={s} className="flex items-start gap-2 body-text leading-relaxed">
-                <CheckCircle className="w-4 h-4 mt-0.5 shrink-0 text-deep" strokeWidth={1.75} /> {s}
-              </li>
-            ))}
-          </ul>
-        </section>
-
-        <div className="flex justify-start pt-2">
-          <button onClick={onBack} className="btn btn-secondary">Back to Insurance Summary</button>
         </div>
-
-        <AttorneyDisclaimer />
       </div>
     </div>
   );

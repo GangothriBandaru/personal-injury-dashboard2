@@ -94,7 +94,7 @@ export const INSURANCE_ANALYSIS: InsuranceAnalysis = {
     { label: "Total Coverage", value: "$1.75M", note: "Primary $1M + umbrella $750K", tone: "info" },
     { label: "Red Flags", value: "3 — Medium Risk", tone: "warning" },
     { label: "Net Recovery Est.", value: "$820K – $1.1M", note: "After liens", tone: "positive" },
-    { label: "First Action", value: "Send ELD demand today", note: "Data overwrites in 27 days", tone: "warning" },
+    { label: "First Action", value: "Send ELD demand today", note: "Data overwrites in 27 days", tone: "info" },
   ],
 
   summaryCards: [

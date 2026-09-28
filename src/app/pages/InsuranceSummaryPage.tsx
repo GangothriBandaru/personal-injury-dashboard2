@@ -7,7 +7,7 @@ import { INSURANCE_ANALYSIS as IA, type Tone } from "../insurance/insuranceData"
 import { resolveCasePolicy, POLICY_UNAVAILABLE } from "../insurance/casePolicy";
 import type { CaseDocument } from "../types/case";
 import {
-  InsuranceBreadcrumb, InsuranceSummaryCards, AttorneyInsight, TONE_PILL, TONE_TEXT, TONE_PANEL,
+  InsuranceBreadcrumb, InsuranceSummaryCards, AttorneyInsight, TONE_PILL, TONE_TEXT,
 } from "../insurance/InsuranceShared";
 
 // ── Insurance Policy Analysis — summary ───────────────────────────────────────
@@ -134,7 +134,7 @@ export function InsuranceSummaryPage({
         <div id="policy-checks" className="lg-card !p-0 overflow-hidden">
           <div className="px-6 py-5 border-b border-line">
             <h2 className="section-header flex items-center gap-2">
-              <ClipboardCheck className="w-5 h-5 text-[#5B6B78]" strokeWidth={1.75} /> Policy Checks
+              <ClipboardCheck className="w-5 h-5 text-deep" strokeWidth={1.75} /> Policy Checks
             </h2>
           </div>
 
@@ -189,7 +189,7 @@ export function InsuranceSummaryPage({
         <div id="net-recovery" className="lg-card p-6">
           <div className="flex items-start justify-between gap-4 flex-wrap mb-5">
             <h2 className="section-header flex items-center gap-2">
-              <DollarSign className="w-5 h-5 text-[#5B6B78]" strokeWidth={1.75} /> Net Recovery Breakdown
+              <DollarSign className="w-5 h-5 text-deep" strokeWidth={1.75} /> Net Recovery Breakdown
             </h2>
             <button
               onClick={() => setShowWorking((s) => !s)}
@@ -247,29 +247,28 @@ export function InsuranceSummaryPage({
           </div>
 
           {/* The figure the breakdown arrives at */}
-          <div id="net-recovery-result" className="mt-5 bg-green-50 border border-green-200 rounded-xl p-4 flex items-center justify-between gap-4 flex-wrap">
+          <div id="net-recovery-result" className="mt-5 lg-zone p-4 flex items-center justify-between gap-4 flex-wrap">
             <div className="flex items-start gap-3 min-w-0">
-              <CheckCircle className="w-5 h-5 text-green-600 shrink-0 mt-0.5" strokeWidth={1.75} />
+              <CheckCircle className="w-5 h-5 text-deep shrink-0 mt-0.5" strokeWidth={1.75} />
               <div>
-                <p className="text-sm font-semibold text-green-800">Estimated net recovery to client</p>
+                <p className="text-sm font-semibold text-ink">Estimated net recovery to client</p>
                 <p className="secondary-text mt-0.5">After all deductions · Before attorney fees</p>
               </div>
             </div>
-            <div className="kpi-value !text-green-700 tabular-nums">{IA.recovery.net}</div>
+            <div className={`kpi-value tabular-nums ${TONE_TEXT.positive}`}>{IA.recovery.net}</div>
           </div>
         </div>
 
         {/* ── Actions ── */}
         <div id="insurance-actions" className="lg-card p-6">
           <h2 className="section-header flex items-center gap-2 mb-4">
-            <AlertTriangle className="w-5 h-5 text-[#B45309]" strokeWidth={1.75} /> Actions Required Now
+            <AlertTriangle className="w-5 h-5 text-deep" strokeWidth={1.75} /> Actions Required Now
           </h2>
           <div className="space-y-3">
             {IA.actions.map((a, i) => (
-              <div key={a.title} className={`rounded-xl border p-4 flex items-start gap-3 ${TONE_PANEL[a.tone]}`}>
-                <span className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 bg-white border ${
-                  a.tone === "critical" ? "border-[#FBD5D5] text-[#B91C1C]" : "border-[#FDE6C8] text-[#B45309]"
-                }`}>
+              <div key={a.title} className="lg-zone lg-zone-grey p-4 flex items-start gap-3">
+                {/* Urgency shows only in the step number's colour, not as a coloured panel */}
+                <span className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 bg-white border border-line ${TONE_TEXT[a.tone]}`}>
                   {String(i + 1).padStart(2, "0")}
                 </span>
                 <div className="min-w-0">
