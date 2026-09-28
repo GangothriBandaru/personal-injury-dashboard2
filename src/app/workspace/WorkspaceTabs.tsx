@@ -4974,8 +4974,9 @@ export function NonEconomicDamagesTab({ goTo, documents }: TabProps) {
         </button>
       </div>
 
-      {/* Negligence Analysis — pillars stacked one below another */}
-      <div className="min-w-0 lg-card bg-offwhite p-6">
+      {/* Negligence Analysis — pillars as compact cards, two per row when the
+          panel is wide enough (measured on the panel, not the window) */}
+      <div className="min-w-0 lg-card bg-offwhite p-6 @container">
         <div className="flex items-center justify-between gap-3 mb-5">
           <h2 className="section-header">Negligence Analysis</h2>
           {pillarStore && !addingPillar && (
@@ -5001,7 +5002,7 @@ export function NonEconomicDamagesTab({ goTo, documents }: TabProps) {
             />
           </div>
         )}
-        <div className="flex flex-col gap-4">
+        <div className="grid grid-cols-1 @2xl:grid-cols-2 gap-4">
           {pillars.map((p, i) => {
             const shown = p.docs.slice(0, 1);
             const more = p.docCount - shown.length;
@@ -5027,39 +5028,40 @@ export function NonEconomicDamagesTab({ goTo, documents }: TabProps) {
             }
 
             return (
-              <div key={p.id} className="border border-line rounded-xl bg-white p-6 flex flex-col gap-5">
-                {/* Header — number, title and question on the left; Edit and icon on the right */}
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
+              <div key={p.id} className="border border-line rounded-xl bg-white p-6 flex flex-col gap-4">
+                {/* Header — pillar number with Edit and icon on one line; the
+                    title and question beneath */}
+                <div>
+                  <div className="flex items-center justify-between gap-3 mb-3">
                     <span className="eyebrow text-deep">Pillar {p.no}</span>
-                    <div className="flex items-center gap-2 flex-wrap mt-1.5">
-                      <h3 className="card-title" style={{ fontSize: "18px" }}>{p.title}</h3>
-                      {changed && (
-                        <span className="pill pill-neutral">
-                          {p.provenance.startsWith("ai")
-                            ? <Sparkles className="w-3 h-3" strokeWidth={1.75} />
-                            : <UserPlus className="w-3 h-3" strokeWidth={1.75} />}
-                          {PILLAR_PROVENANCE_LABEL[p.provenance]}
-                        </span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {pillarStore && (
+                        <button
+                          onClick={() => { setAddingPillar(false); setPillarDraft(pillarDraftOf(p)); setEditingPillar(p.id); }}
+                          title="Edit pillar"
+                          aria-label={`Edit ${p.title}`}
+                          className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-semibold text-[#8A98A3] hover:bg-tint hover:text-deep transition-colors"
+                        >
+                          <Pencil className="w-3.5 h-3.5" strokeWidth={1.75} /> Edit
+                        </button>
                       )}
+                      <div className="w-9 h-9 rounded-lg bg-tint flex items-center justify-center shrink-0">
+                        <Icon className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                      </div>
                     </div>
-                    <p className="text-sm font-medium text-deep mt-0.5">{p.subtitle}</p>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {pillarStore && (
-                      <button
-                        onClick={() => { setAddingPillar(false); setPillarDraft(pillarDraftOf(p)); setEditingPillar(p.id); }}
-                        title="Edit pillar"
-                        aria-label={`Edit ${p.title}`}
-                        className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-semibold text-[#8A98A3] hover:bg-tint hover:text-deep transition-colors"
-                      >
-                        <Pencil className="w-3.5 h-3.5" strokeWidth={1.75} /> Edit
-                      </button>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="card-title" style={{ fontSize: "18px" }}>{p.title}</h3>
+                    {changed && (
+                      <span className="pill pill-neutral">
+                        {p.provenance.startsWith("ai")
+                          ? <Sparkles className="w-3 h-3" strokeWidth={1.75} />
+                          : <UserPlus className="w-3 h-3" strokeWidth={1.75} />}
+                        {PILLAR_PROVENANCE_LABEL[p.provenance]}
+                      </span>
                     )}
-                    <div className="w-9 h-9 rounded-lg bg-tint flex items-center justify-center shrink-0">
-                      <Icon className="w-4 h-4 text-deep" strokeWidth={1.75} />
-                    </div>
                   </div>
+                  <p className="text-sm font-medium text-deep mt-0.5">{p.subtitle}</p>
                 </div>
 
                 {/* Analysis */}
@@ -5095,7 +5097,7 @@ export function NonEconomicDamagesTab({ goTo, documents }: TabProps) {
                         className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-offwhite px-2.5 py-1.5 text-xs text-ink cursor-pointer hover:border-brand hover:bg-tint hover:shadow-sm transition-all"
                       >
                         <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
-                        <span className="truncate max-w-[260px]">{d}</span>
+                        <span className="truncate max-w-[180px]">{d}</span>
                       </button>
                     ))}
                     {more > 0 && (
@@ -5121,17 +5123,18 @@ export function NonEconomicDamagesTab({ goTo, documents }: TabProps) {
                   )}
                 </div>
 
-                {/* Actions — Preview / Insights open the shared Document Workspace */}
-                <div className="border-t border-line pt-4 flex flex-col sm:flex-row sm:justify-end gap-2">
+                {/* Actions — Preview / Insights open the shared Document Workspace.
+                    Pinned to the bottom so cards in a row end level. */}
+                <div className="mt-auto border-t border-line pt-4 flex items-center gap-2">
                   <button
                     onClick={() => openNeg(i, "preview")}
-                    className="flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-line text-ink rounded-lg text-sm font-medium hover:bg-wash transition-colors"
+                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-line text-ink rounded-lg text-sm font-medium hover:bg-wash transition-colors"
                   >
                     <Eye className="w-4 h-4" strokeWidth={1.75} /> Preview Evidence
                   </button>
                   <button
                     onClick={() => openNeg(i, "insights")}
-                    className="flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-line text-deep rounded-lg text-sm font-medium hover:bg-tint transition-colors"
+                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-line text-deep rounded-lg text-sm font-medium hover:bg-tint transition-colors"
                   >
                     <Sparkles className="w-4 h-4" strokeWidth={1.75} /> View Insights
                   </button>
