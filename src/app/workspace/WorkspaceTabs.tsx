@@ -5657,7 +5657,7 @@ export function LiabilityAnalysisTab({ goTo, documents }: TabProps) {
       {/* RIGHT — Violation cards (~69%). The heading stays put; only the list
           of cards scrolls, and reaching its end does not scroll the page. */}
       <div className="min-w-0 lg:min-h-0">
-        <div className="lg-card bg-offwhite p-6 flex flex-col lg:h-full">
+        <div className="lg-card bg-offwhite p-6 flex flex-col lg:h-full @container">
         <div className="flex items-center justify-between gap-3 mb-4 shrink-0">
           <h2 className="page-title" style={{ fontSize: "24px" }}>Violations</h2>
           {violationStore && !addingViolation && (
@@ -5669,9 +5669,12 @@ export function LiabilityAnalysisTab({ goTo, documents }: TabProps) {
             </button>
           )}
         </div>
-        <div className="space-y-4 lg:flex-1 lg:overflow-y-auto lg:overscroll-contain lg:min-h-0 lg:-mr-3 lg:pr-3">
+        <div className="lg:flex-1 lg:overflow-y-auto lg:overscroll-contain lg:min-h-0 lg:-mr-3 lg:pr-3">
+        {/* Compact cards, two per row when the panel is wide enough; the add
+            and edit forms take the full row */}
+        <div className="grid grid-cols-1 @2xl:grid-cols-2 gap-4">
         {addingViolation && violationStore && (
-          <div className="lg-card p-6">
+          <div className="lg-card p-6 @2xl:col-span-2">
             <ViolationForm
               title="Add Violation"
               draft={violationDraft}
@@ -5692,7 +5695,7 @@ export function LiabilityAnalysisTab({ goTo, documents }: TabProps) {
 
           if (editingViolation === v.id && violationStore) {
             return (
-              <div key={v.id} className="lg-card p-6">
+              <div key={v.id} className="lg-card p-6 @2xl:col-span-2">
                 <ViolationForm
                   title={`Edit ${v.title}`}
                   draft={violationDraft}
@@ -5710,14 +5713,14 @@ export function LiabilityAnalysisTab({ goTo, documents }: TabProps) {
           }
 
           return (
-            <div key={v.id} className="lg-card @container">
-              {/* Header — icon, title, severity and Edit on one scannable line */}
-              <div className="px-6 pt-6 pb-5 flex items-center gap-3">
+            <div key={v.id} className="lg-card flex flex-col">
+              {/* Header — icon, title and severity, with Edit at the right */}
+              <div className="px-5 pt-5 pb-4 flex items-start gap-3">
                 <div className="w-9 h-9 rounded-lg bg-tint border border-line flex items-center justify-center shrink-0">
                   <Gavel className="w-[18px] h-[18px] text-deep" strokeWidth={1.75} />
                 </div>
-                <div className="min-w-0 flex-1 flex items-center gap-2 flex-wrap">
-                  <h3 className="text-xl font-semibold text-ink leading-tight tracking-tight">{v.title}</h3>
+                <div className="min-w-0 flex-1 flex items-center gap-2 flex-wrap pt-1">
+                  <h3 className="text-lg font-semibold text-ink leading-tight tracking-tight">{v.title}</h3>
                   <span className={VIOLATION_SEVERITY_PILL[v.severity]}>{v.severity}</span>
                   {changed && (
                     <span className="pill pill-neutral">
@@ -5740,8 +5743,8 @@ export function LiabilityAnalysisTab({ goTo, documents }: TabProps) {
                 )}
               </div>
 
-              {/* Body — description on the left, the violation's facts on the right */}
-              <div className="px-6 pb-7 space-y-6">
+              {/* Body — description, then the violation's facts */}
+              <div className="px-5 pb-5 space-y-5">
                 <div className="min-w-0">
                   <p className="body-text leading-relaxed">{v.description}</p>
                   {/* The AI read the wording as it was. Once it is rewritten by
@@ -5756,21 +5759,19 @@ export function LiabilityAnalysisTab({ goTo, documents }: TabProps) {
                   )}
                 </div>
 
-                {/* Metadata — Location | Applied Legal Statute | Supporting Documents
-                    in one row under the description, sized to their content (the
-                    document list gets the most room). Only a very narrow card
-                    stacks them. */}
-                <div className="grid grid-cols-1 @md:grid-cols-[28fr_32fr_40fr] gap-x-6 gap-y-4 py-1">
+                {/* Metadata — Location and Applied Legal Statute side by side,
+                    Supporting Documents beneath them with the full card width */}
+                <div className="grid grid-cols-2 gap-x-5 gap-y-4 border-t border-line pt-4">
                   <div className="min-w-0">
-                    <div className="flex items-center gap-1.5 eyebrow mb-2">
+                    <div className="flex items-center gap-1.5 eyebrow mb-1.5">
                       <MapPin className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} /> Location
                     </div>
-                    <div className="text-sm font-semibold text-ink leading-relaxed">{v.jurisdiction}</div>
+                    <div className="text-sm font-semibold text-ink leading-snug">{v.jurisdiction}</div>
                   </div>
 
                   {/* Applied Legal Statute — statute code only; click to expand reasoning */}
                   <div className="min-w-0">
-                    <div className="flex items-center gap-1.5 eyebrow mb-2">
+                    <div className="flex items-center gap-1.5 eyebrow mb-1.5">
                       <Gavel className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} /> Applied Legal Statute
                     </div>
                     <button
@@ -5784,8 +5785,8 @@ export function LiabilityAnalysisTab({ goTo, documents }: TabProps) {
                   </div>
 
                   {/* Supporting Documents */}
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5 eyebrow mb-2">
+                  <div className="col-span-2 min-w-0">
+                    <div className="flex items-center gap-1.5 eyebrow mb-1.5">
                       <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} /> Supporting Documents ({v.evidence.length})
                     </div>
                     <div className="flex items-center gap-x-3 gap-y-1 flex-wrap">
@@ -5811,11 +5812,9 @@ export function LiabilityAnalysisTab({ goTo, documents }: TabProps) {
                     )}
                   </div>
                 </div>
-              </div>
 
-              {/* Applied Legal Statute — expanded reasoning */}
-              {statuteShown && (
-                <div className="px-6 pb-5">
+                {/* Applied Legal Statute — expanded reasoning */}
+                {statuteShown && (
                   <div className="rounded-xl border border-line p-4 space-y-3 bg-offwhite">
                     <div className="rounded-lg bg-[#F6FDFF] border border-[#D6F2F7] p-3.5">
                       <div className="flex items-center gap-2 mb-1"><Sparkles className="w-4 h-4 text-deep" strokeWidth={1.75} /><span className="eyebrow text-deep">AI Summary</span></div>
@@ -5830,50 +5829,55 @@ export function LiabilityAnalysisTab({ goTo, documents }: TabProps) {
                       <span className="text-sm font-bold text-ink tabular-nums">{v.confidence}%</span>
                     </div>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
 
-              {/* Footer — Similar Statutes on the left, Preview / Insights on the right */}
-              <div className="border-t border-line px-6 py-5 flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+              {/* Footer — pinned to the bottom so cards in a row end level:
+                  Similar Statutes, then Preview / Insights */}
+              <div className="mt-auto border-t border-line px-5 py-4 space-y-3">
                 <button
                   onClick={() => toggleId(setSimilarOpen, v.id)}
                   aria-expanded={similarShown}
-                  className="inline-flex items-center gap-2 text-sm font-medium text-deep hover:text-ink transition-colors text-left"
+                  className="w-full flex items-center justify-between gap-2 text-sm font-medium text-deep hover:text-ink transition-colors text-left"
                 >
-                  <Scale className="w-4 h-4 shrink-0" strokeWidth={1.75} /> Want to see similar statutes considered?
+                  <span className="flex items-center gap-2 min-w-0">
+                    <Scale className="w-4 h-4 shrink-0" strokeWidth={1.75} /> Want to see similar statutes considered?
+                  </span>
                   <ChevronDown className={`w-4 h-4 text-[#5B6B78] shrink-0 transition-transform duration-200 ${similarShown ? "" : "-rotate-90"}`} strokeWidth={1.75} />
                 </button>
-                <div className="flex items-center gap-3">
+
+                {/* Similar Statutes — collapsed by default */}
+                {similarShown && (
+                  <div className="space-y-2">
+                    {v.similar.map((s) => (
+                      <div key={s.name} className="rounded-lg border border-line bg-offwhite p-3.5">
+                        <div className="flex items-center gap-2 text-sm font-semibold text-ink mb-1.5"><Scale className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />{s.name}</div>
+                        <p className="secondary-text mb-1"><span className="font-medium text-ink">Considered:</span> {s.reasonConsidered}</p>
+                        <p className="secondary-text"><span className="font-medium text-ink">Not selected:</span> {s.whyNot}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2">
                   <button
                     onClick={() => openViolation(i, "preview")}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-white border border-line text-deep text-sm font-medium hover:bg-wash transition-all"
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-white border border-line text-deep text-sm font-medium hover:bg-wash transition-all"
                   >
                     <Eye className="w-4 h-4" strokeWidth={1.75} /> Preview Evidence
                   </button>
                   <button
                     onClick={() => openViolation(i, "insights")}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-brand hover:bg-deep text-white text-sm font-semibold transition-all"
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-brand hover:bg-deep text-white text-sm font-semibold transition-all"
                   >
                     <Sparkles className="w-4 h-4" strokeWidth={1.75} /> View Insights
                   </button>
                 </div>
               </div>
-
-              {/* Similar Statutes — collapsed by default */}
-              {similarShown && (
-                <div className="border-t border-line p-4 space-y-2 bg-offwhite rounded-b-[14px]">
-                  {v.similar.map((s) => (
-                    <div key={s.name} className="rounded-lg border border-line bg-white p-3.5">
-                      <div className="flex items-center gap-2 text-sm font-semibold text-ink mb-1.5"><Scale className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />{s.name}</div>
-                      <p className="secondary-text mb-1"><span className="font-medium text-ink">Considered:</span> {s.reasonConsidered}</p>
-                      <p className="secondary-text"><span className="font-medium text-ink">Not selected:</span> {s.whyNot}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           );
         })}
+        </div>
         </div>
         </div>
       </div>
