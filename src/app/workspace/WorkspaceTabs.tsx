@@ -7,7 +7,7 @@ import {
   HeartPulse, ClipboardList, Image as ImageIcon, Video, FileSignature, Quote,
   Pencil, RotateCcw, History, TrendingUp, TrendingDown, Info, Shield, Circle, Loader2, Bot, Send,
   Plus, UserPlus, Receipt, Trash2, Check,
-  ArrowUpRight,
+  ArrowUpRight, Briefcase, Home, Wallet, Car,
 } from "lucide-react";
 import type { AnalysisFinding, CaseDocument } from "../types/case";
 import { classifyDocuments } from "../types/case";
@@ -34,12 +34,13 @@ import {
   type ViolationItem, type ViolationAudit, type ViolationSeverity,
 } from "./ViolationsContext";
 import {
-  useDamagesOptional, attorneyActor, formatDamageUSD, ECONOMIC_CATEGORIES,
+  useDamagesOptional, attorneyActor, formatDamageUSD, ECONOMIC_CATEGORIES, ECONOMIC_SUBCATEGORIES, isEconomicCategory,
   DAMAGE_SEED, DAMAGE_PROVENANCE_LABEL, DAMAGE_ACTION_LABEL, DAMAGE_FIELD_LABEL, BUCKET_LABEL,
   type DamageAudit, type DamageBucket, type DamageItem, type DamageProvenance,
   type EconomicCategory, type FieldChange,
 } from "../damages/DamagesContext";
 import { InjuryIntelligenceSection } from "../components/InjuryIntelligenceSection";
+import { MedicalPractitionersCard } from "../practitioners/MedicalPractitionersPanel";
 
 // ── Shared model & helpers ────────────────────────────────────────────────────
 
@@ -328,8 +329,9 @@ export function OverviewTab({ model, documents, goTo, onOpenInsurance }: TabProp
   return (
     <>
     <div className="grid grid-cols-1 lg:grid-cols-20 gap-8 items-start">
-      {/* LEFT — 30% */}
-      <div className="lg:col-span-6 space-y-6 lg:sticky lg:top-[176px] self-start">
+      {/* LEFT — 30%. Sticky; when its cards are taller than the window it
+          scrolls on its own, so Medical Practitioners is never out of reach. */}
+      <div className="lg:col-span-6 space-y-6 lg:sticky lg:top-[176px] self-start lg:max-h-[calc(100vh-264px)] lg:overflow-y-auto lg:overscroll-contain lg:-mx-2 lg:px-2 lg:pb-1">
         {/* Case Snapshot */}
         <div className="lg-card p-6">
           <h3 className="card-title mb-4">Case Snapshot</h3>
@@ -376,6 +378,9 @@ export function OverviewTab({ model, documents, goTo, onOpenInsurance }: TabProp
             <ClipboardList className="w-4 h-4" strokeWidth={1.75} /> View Chronology
           </button>
         </div>
+
+        {/* Medical Practitioners — who treated the plaintiff and where */}
+        <MedicalPractitionersCard />
       </div>
 
       {/* RIGHT — 70% */}
@@ -1286,10 +1291,218 @@ function EvidenceChips({ evidence, onOpen, align }: { evidence: string[]; onOpen
 export interface UserChronology { medical: ChronEvent[]; event: ChronEvent[] }
 export const EMPTY_USER_CHRONOLOGY: UserChronology = { medical: [], event: [] };
 
+// ── Medical Conditions: one Injury Signal ───────────────────────────────────
+// Built like the Analysis stage's signal cards (eyebrow tag, title, summary,
+// evidence), with the three facts the comparison turns on — timing, severity
+// and relationship — shown as tags. Each shows the record's value or says it
+// is not established; none is ever inferred here.
+
+const CONDITION_TIMING_LABEL: Record<NonNullable<AnalysisFinding["timing"]>, string> = {
+  "pre-incident": "Pre-Incident",
+  "post-incident": "Post-Incident",
+};
+
+const CONDITION_RELATION_LABEL: Record<NonNullable<AnalysisFinding["relationship"]>, string> = {
+  new: "New",
+  aggravated: "Aggravated",
+  related: "Related to Pre-existing",
+};
+
+// Severity and relationship → the product's existing status pills.
+const CONDITION_SEVERITY_PILL: Record<NonNullable<AnalysisFinding["severity"]>, string> = {
+  Mild: "pill pill-complete",
+  Moderate: "pill pill-neutral",
+  Severe: "pill pill-progress",
+  Critical: "pill pill-risk",
+};
+
+const CONDITION_RELATION_PILL: Record<NonNullable<AnalysisFinding["relationship"]>, string> = {
+  new: "pill pill-neutral",
+  aggravated: "pill pill-progress",
+  related: "pill pill-neutral",
+};
+
+// A labelled dropdown in the Chronology Filters card — the same control the
+// Medical / Case Events filter uses.
+function ChronFilterSelect<T extends string>({
+  label, value, options, open, onToggle, onPick,
+}: {
+  label: string;
+  value: T;
+  options: { value: T; label: string }[];
+  open: boolean;
+  onToggle: () => void;
+  onPick: (v: T) => void;
+}) {
+  const current = options.find((o) => o.value === value)?.label ?? "";
+  const narrowed = value !== options[0]?.value;
+  return (
+    <div>
+      <div className="eyebrow mb-2">{label}</div>
+      <div className="relative">
+        <button
+          onClick={onToggle}
+          className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
+            narrowed ? "border-brand bg-tint text-deep" : "border-line bg-white text-ink hover:border-soft"
+          }`}
+        >
+          <span className="truncate">{current}</span>
+          <ChevronDown className={`w-4 h-4 text-[#5B6B78] shrink-0 transition-transform ${open ? "rotate-180" : ""}`} strokeWidth={1.75} />
+        </button>
+        {open && (
+          <>
+            <div className="fixed inset-0 z-10" onClick={onToggle} />
+            <div className="absolute left-0 right-0 mt-1.5 z-20 rounded-lg border border-line bg-white shadow-lg p-1">
+              {options.map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => onPick(opt.value)}
+                  className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
+                    value === opt.value ? "bg-tint text-deep font-medium" : "text-ink hover:bg-wash"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function InjurySignalCard({
+  signal, linkedPost = [], onPreview, onInsights,
+}: {
+  signal: AnalysisFinding;
+  /** For a pre-incident condition: the post-incident conditions the record
+   *  relates to it, so the link reads from both ends. */
+  linkedPost?: AnalysisFinding[];
+  onPreview: () => void;
+  onInsights: () => void;
+}) {
+  const files = signal.evidence.map((e) => e.file);
+  return (
+    <div className="rounded-xl border border-line bg-white p-5 flex flex-col">
+      <div className="eyebrow flex items-center gap-1.5 mb-2">
+        <Stethoscope className="w-4 h-4 text-deep" strokeWidth={1.75} />
+        {signal.tag}
+      </div>
+      <h3 className="card-title leading-snug">{signal.title}</h3>
+
+      {/* Timing and severity */}
+      <div className="flex items-center gap-1.5 flex-wrap mt-2.5">
+        {signal.timing
+          ? <span className="pill pill-neutral uppercase tracking-[0.06em]">{CONDITION_TIMING_LABEL[signal.timing]}</span>
+          : <span className="text-xs text-[#8A98A3]">Timing not established</span>}
+        {signal.severity
+          ? <span className={CONDITION_SEVERITY_PILL[signal.severity]}>{signal.severity}</span>
+          : <span className="text-xs text-[#8A98A3]">Severity not assessed</span>}
+      </div>
+
+      <p className="body-text leading-relaxed mt-3">{signal.description}</p>
+
+      {/* Relationship. Where the record relates this condition to a pre-existing
+          one, the link is drawn: pre-existing condition → relationship → this. */}
+      {signal.timing !== "pre-incident" && (
+        signal.relationship ? (
+          <div className="mt-3 rounded-lg bg-tint border border-[#D6F2F7] p-3">
+            <div className="eyebrow mb-1.5">Relationship</div>
+            <div className="flex items-center gap-2 flex-wrap text-sm">
+              {signal.relatedCondition && (
+                <>
+                  <span className="font-medium text-ink">{signal.relatedCondition}</span>
+                  <span className="text-xs text-[#5B6B78]">Pre-incident</span>
+                  <ArrowRight className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+                </>
+              )}
+              <span className={`${CONDITION_RELATION_PILL[signal.relationship]} uppercase tracking-[0.06em]`}>
+                {CONDITION_RELATION_LABEL[signal.relationship]}
+              </span>
+              {signal.relatedCondition && (
+                <>
+                  <ArrowRight className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+                  <span className="font-medium text-ink">{signal.title}</span>
+                </>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="mt-3 flex items-center gap-2 flex-wrap">
+            <span className="eyebrow">Relationship</span>
+            <span className="text-xs text-[#8A98A3]">Not determined in the record</span>
+          </div>
+        )
+      )}
+      {signal.timing === "pre-incident" && linkedPost.length > 0 && (
+        <div className="mt-3 rounded-lg bg-tint border border-[#D6F2F7] p-3">
+          <div className="eyebrow mb-1.5">After the Incident</div>
+          <div className="space-y-1">
+            {linkedPost.map((p) => (
+              <div key={p.title} className="flex items-center gap-2 flex-wrap text-sm">
+                {p.relationship && (
+                  <span className={`${CONDITION_RELATION_PILL[p.relationship]} uppercase tracking-[0.06em]`}>
+                    {CONDITION_RELATION_LABEL[p.relationship]}
+                  </span>
+                )}
+                <ArrowRight className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+                <span className="font-medium text-ink">{p.title}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Supporting evidence */}
+      <div className="mt-4 pt-4 border-t border-line">
+        <div className="eyebrow mb-2">Supporting Evidence</div>
+        {files.length > 0 ? (
+          <div className="flex items-center gap-2 flex-wrap">
+            {files.map((f) => (
+              <button
+                key={f}
+                onClick={onPreview}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-offwhite px-2.5 py-1.5 text-xs text-ink hover:border-brand hover:bg-tint transition-all"
+              >
+                <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+                <span className="truncate max-w-[200px]">{f}</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-[#8A98A3]">No supporting documents on file.</p>
+        )}
+      </div>
+
+      {/* Preview & Insights — as on the Analysis stage's signal cards */}
+      <div className="mt-auto pt-4 flex items-center gap-2">
+        <button
+          onClick={onPreview}
+          className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-line text-ink rounded-lg text-sm font-medium hover:bg-wash transition-colors"
+        >
+          <Eye className="w-4 h-4" strokeWidth={1.75} /> Preview
+        </button>
+        <button
+          onClick={onInsights}
+          className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-line text-deep rounded-lg text-sm font-medium hover:bg-tint transition-colors"
+        >
+          <Sparkles className="w-4 h-4" strokeWidth={1.75} /> Insights
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function MedicalTimelineTab({
-  documents, goTo, userChronology = EMPTY_USER_CHRONOLOGY, onAddChronology,
+  documents, goTo, findings = [], userChronology = EMPTY_USER_CHRONOLOGY, onAddChronology,
 }: TabProps & { userChronology?: UserChronology; onAddChronology?: (kind: "medical" | "event", ev: ChronEvent) => void }) {
-  const [subTab, setSubTab] = useState<"medical" | "event">("medical");
+  // Medical and Event Chronology answer "what happened and when"; Medical
+  // Conditions answers what the plaintiff's condition was before and after.
+  const [subTab, setSubTab] = useState<"medical" | "event" | "conditions">("medical");
+  // The timeline the date and event-type filters apply to. On Medical Conditions
+  // they keep their medical-timeline meaning, and using them returns there.
+  const timelineKind: "medical" | "event" = subTab === "event" ? "event" : "medical";
   // Inline accordion: only one panel open across all medical cards at a time.
   const [openPanel, setOpenPanel] = useState<{ index: number; mode: PanelMode } | null>(null);
   const togglePanel = (index: number, mode: PanelMode) =>
@@ -1349,6 +1562,7 @@ export function MedicalTimelineTab({
   // Click handling inside the calendar grid: single sets the date; range fills
   // from → to, then starts over on the next click.
   const pickDay = (d: Date) => {
+    if (subTab === "conditions") setSubTab("medical");
     if (dateMode === "single") { setSelDate(d); return; }
     if (!rangeFrom || (rangeFrom && rangeTo)) { setRangeFrom(d); setRangeTo(null); return; }
     if (d.getTime() < rangeFrom.getTime()) { setRangeTo(rangeFrom); setRangeFrom(d); }
@@ -1357,24 +1571,48 @@ export function MedicalTimelineTab({
   const hasDateFilter = dateMode === "single" ? !!selDate : !!rangeFrom;
 
   // Switching tabs resets the category + date filters (and any open dropdown).
-  const selectSubTab = (key: "medical" | "event") => {
+  const selectSubTab = (key: "medical" | "event" | "conditions") => {
     setSubTab(key);
     setFilter("all");
     setFilterOpen(false);
+    setCondOpen(null);
     clearDates();
   };
 
+  // ── Medical Conditions ──
+  // The case's own Injury Signals — the same findings the Analysis stage shows —
+  // grouped by when the condition was documented. Nothing here is derived or
+  // filled in: a signal shows only the timing, severity and relationship the
+  // record gives it.
+  const injurySignals = findings.filter((f) => f.kind === "injury");
+  const [condTiming, setCondTiming] = useState<"all" | "pre-incident" | "post-incident">("all");
+  const [condRelation, setCondRelation] = useState<"all" | "new" | "aggravated" | "related">("all");
+  const [condOpen, setCondOpen] = useState<"timing" | "relation" | null>(null);
+  const shownSignals = injurySignals.filter(
+    (s) => (condTiming === "all" || s.timing === condTiming) && (condRelation === "all" || s.relationship === condRelation),
+  );
+  const preSignals = shownSignals.filter((s) => s.timing === "pre-incident");
+  const postSignals = shownSignals.filter((s) => s.timing === "post-incident");
+  const untimedSignals = shownSignals.filter((s) => !s.timing);
+  // A signal's evidence opens in the same review workspace as a timeline card —
+  // Preview on the documents, Insights on the AI panel.
+  const openSignalEvidence = (s: AnalysisFinding, view?: "insights") =>
+    openEvidence(
+      { date: "", title: s.title, description: s.description, insight: s.conclusion, evidence: s.evidence.map((e) => e.file) },
+      view ? { ai: view } : {},
+    );
+
   const categoryOf = (ev: ChronEvent) =>
-    ev.category ?? (subTab === "medical" ? MEDICAL_CATEGORIES : EVENT_CATEGORIES)[ev.title] ?? "Other";
+    ev.category ?? (timelineKind === "medical" ? MEDICAL_CATEGORIES : EVENT_CATEGORIES)[ev.title] ?? "Other";
   // Base options, plus any category a manually added event introduced.
-  const baseFilters = subTab === "medical" ? MEDICAL_FILTERS : EVENT_FILTERS;
+  const baseFilters = timelineKind === "medical" ? MEDICAL_FILTERS : EVENT_FILTERS;
   const filterOptions = [
     ...baseFilters,
-    ...Array.from(new Set((subTab === "medical" ? userMedical : userEvent).map(categoryOf))).filter(
+    ...Array.from(new Set((timelineKind === "medical" ? userMedical : userEvent).map(categoryOf))).filter(
       (c) => !baseFilters.includes(c),
     ),
   ];
-  const allLabel = subTab === "medical" ? "All Medical Events" : "All Case Events";
+  const allLabel = timelineKind === "medical" ? "All Medical Events" : "All Case Events";
   const filterLabel = filter === "all" ? allLabel : filter;
 
   const eventDate = (ev: ChronEvent) => {
@@ -1406,7 +1644,7 @@ export function MedicalTimelineTab({
     ]),
   );
   const q = search.trim().toLowerCase();
-  const events = (subTab === "medical" ? medicalAll : eventAll).filter(
+  const events = (timelineKind === "medical" ? medicalAll : eventAll).filter(
     (ev) =>
       (filter === "all" || categoryOf(ev) === filter) &&
       (q === "" || (ev.title + " " + ev.description).toLowerCase().includes(q)) &&
@@ -1414,11 +1652,22 @@ export function MedicalTimelineTab({
   );
   const evidenceDocs = evidenceEvent ? evidenceEvent.evidence.map(docForFile) : [];
 
+  // Two-panel workspace on desktop, sized to the space beneath the case header.
+  // The floor is what Filters and Timeline Navigator need to show in full.
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const sidebarContentRef = useRef<HTMLDivElement>(null);
+  const panelHeight = useWorkspacePanelHeight(workspaceRef, 520, sidebarContentRef);
+
   return (
     <>
-    <div className="w-full flex flex-col lg:flex-row gap-6 items-start">
-      {/* Timeline content — placed on the left, widened to fill */}
-      <div className="flex-1 min-w-0 lg:order-1 rounded-2xl border border-line bg-offwhite p-8 space-y-8">
+    <div
+      ref={workspaceRef}
+      className="w-full grid grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)] gap-6 items-start lg:items-stretch"
+      style={panelHeight ? { height: panelHeight } : undefined}
+    >
+      {/* RIGHT — the chronology, the one scroll area of the workspace; reaching
+          its end does not carry on into the page */}
+      <div className="min-w-0 order-2 rounded-2xl border border-line bg-offwhite p-8 space-y-8 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain">
       {/* Header */}
       <div className="flex items-start justify-between gap-6">
         <div>
@@ -1438,6 +1687,7 @@ export function MedicalTimelineTab({
           {([
             { key: "medical", label: "Medical Chronology", count: medicalAll.length },
             { key: "event", label: "Event Chronology", count: eventAll.length },
+            { key: "conditions", label: "Medical Conditions", count: injurySignals.length },
           ] as const).map((t) => {
             const active = subTab === t.key;
             return (
@@ -1457,7 +1707,9 @@ export function MedicalTimelineTab({
           })}
         </div>
 
-        {/* Right — Add Chronology + expandable search (date & event filters live in the Filters card) */}
+        {/* Right — Add Chronology + expandable search (date & event filters live in the Filters card).
+            Both act on timeline events, so they belong to the two timeline views. */}
+        {subTab !== "conditions" && (
         <div className="flex items-center gap-2">
           {/* Add Chronology — opens the form for whichever tab is active */}
           <button
@@ -1503,10 +1755,11 @@ export function MedicalTimelineTab({
           </div>
 
         </div>
+        )}
       </div>
 
       {/* Active date filter — small chip below the tabs; ✕ clears it */}
-      {hasDateFilter && (
+      {hasDateFilter && subTab !== "conditions" && (
         <div className="flex items-center gap-2 flex-wrap">
           <span className="inline-flex items-center gap-1.5 rounded-full bg-tint border border-[#D6F2F7] pl-3 pr-1.5 py-1 text-deep text-xs font-medium">
             <Calendar className="w-3.5 h-3.5" strokeWidth={1.75} />
@@ -1526,8 +1779,102 @@ export function MedicalTimelineTab({
       )}
       </div>
 
+      {/* Medical Conditions — what existed before the incident, then what was
+          documented after it and how the two relate */}
+      {subTab === "conditions" && (
+        <div className="space-y-8">
+          <p className="secondary-text">
+            The case&apos;s Injury Signals, grouped by when each condition was documented. Severity and
+            relationship appear only where the record assesses them.
+          </p>
+          {injurySignals.length === 0 ? (
+            <div className="text-center py-16 secondary-text">No Injury Signals have been identified for this case.</div>
+          ) : shownSignals.length === 0 && condRelation !== "all" ? (
+            // A timing choice alone still shows its group and that group's own
+            // empty state; only a relationship that nothing carries empties it all.
+            <div className="text-center py-16 secondary-text">No conditions match the current filters.</div>
+          ) : (
+            <>
+              {condTiming !== "post-incident" && (
+                <section className="space-y-4">
+                  <div className="flex items-center gap-2.5 pb-3 border-b border-line">
+                    <div className="w-8 h-8 rounded-lg bg-tint flex items-center justify-center shrink-0">
+                      <History className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                    </div>
+                    <h3 className="card-title flex-1">Pre-Incident Medical Conditions</h3>
+                    <span className="text-xs font-semibold text-deep bg-tint border border-[#D6F2F7] rounded-full px-2 py-0.5 tabular-nums">{preSignals.length}</span>
+                  </div>
+                  {preSignals.length > 0 ? (
+                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                      {preSignals.map((s) => (
+                        <InjurySignalCard
+                          key={s.title}
+                          signal={s}
+                          linkedPost={injurySignals.filter((p) => p.relatedCondition === s.title)}
+                          onPreview={() => openSignalEvidence(s)}
+                          onInsights={() => openSignalEvidence(s, "insights")}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-dashed border-line bg-white p-5 secondary-text">
+                      No pre-incident conditions are documented in the case record.
+                    </div>
+                  )}
+                </section>
+              )}
+
+              {condTiming !== "pre-incident" && (
+                <section className="space-y-4">
+                  <div className="flex items-center gap-2.5 pb-3 border-b border-line">
+                    <div className="w-8 h-8 rounded-lg bg-tint flex items-center justify-center shrink-0">
+                      <Activity className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                    </div>
+                    <h3 className="card-title flex-1">Post-Incident Medical Conditions</h3>
+                    <span className="text-xs font-semibold text-deep bg-tint border border-[#D6F2F7] rounded-full px-2 py-0.5 tabular-nums">{postSignals.length}</span>
+                  </div>
+                  {postSignals.length > 0 ? (
+                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                      {postSignals.map((s) => (
+                        <InjurySignalCard
+                          key={s.title}
+                          signal={s}
+                          onPreview={() => openSignalEvidence(s)}
+                          onInsights={() => openSignalEvidence(s, "insights")}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-dashed border-line bg-white p-5 secondary-text">
+                      No post-incident conditions match the current filters.
+                    </div>
+                  )}
+                </section>
+              )}
+
+              {/* Signals the record does not place before or after the incident */}
+              {untimedSignals.length > 0 && condTiming === "all" && (
+                <section className="space-y-4">
+                  <h3 className="card-title pb-3 border-b border-line">Timing Not Established</h3>
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                    {untimedSignals.map((s) => (
+                      <InjurySignalCard
+                        key={s.title}
+                        signal={s}
+                        onPreview={() => openSignalEvidence(s)}
+                        onInsights={() => openSignalEvidence(s, "insights")}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
       {/* Timeline */}
-      {events.length === 0 ? (
+      {subTab === "conditions" ? null : events.length === 0 ? (
         <div className="text-center py-16 secondary-text">No events match the current filters.</div>
       ) : (
       <div className="relative">
@@ -1679,8 +2026,10 @@ export function MedicalTimelineTab({
 
       </div>
 
-      {/* RIGHT column — Filters card (top) + Timeline Navigator (below) */}
-      <div className="w-full lg:w-[300px] shrink-0 lg:order-2 lg:sticky lg:top-[176px] self-start space-y-6">
+      {/* LEFT — Filters (top) + Timeline Navigator (below), static while the
+          chronology scrolls. First in the stack on narrow screens. */}
+      <div className="min-w-0 order-1">
+      <div ref={sidebarContentRef} className="space-y-6">
 
         {/* Filters — date filter + event-type filter */}
         <div className="rounded-2xl border border-line bg-white p-5 space-y-4">
@@ -1689,6 +2038,9 @@ export function MedicalTimelineTab({
             <h3 className="card-title">Filters</h3>
           </div>
 
+          {/* Date and Medical Events filter the timelines; Medical Conditions and
+              Condition Relationship filter the Injury Signals. Using a filter shows
+              the view it applies to. */}
           {/* Date filter — opens the date-picker popup (single date or custom range) */}
           <div>
             <div className="eyebrow mb-2">Date</div>
@@ -1729,7 +2081,7 @@ export function MedicalTimelineTab({
 
           {/* Event-type filter — dropdown; options follow the active chronology tab */}
           <div>
-            <div className="eyebrow mb-2">{subTab === "medical" ? "Medical Events" : "Case Events"}</div>
+            <div className="eyebrow mb-2">{timelineKind === "medical" ? "Medical Events" : "Case Events"}</div>
             <div className="relative">
               <button
                 onClick={() => setFilterOpen((o) => !o)}
@@ -1747,7 +2099,7 @@ export function MedicalTimelineTab({
                     {[{ value: "all", label: allLabel }, ...filterOptions.map((c) => ({ value: c, label: c }))].map((opt) => (
                       <button
                         key={opt.value}
-                        onClick={() => { setFilter(opt.value); setFilterOpen(false); }}
+                        onClick={() => { setFilter(opt.value); setFilterOpen(false); if (subTab === "conditions") setSubTab("medical"); }}
                         className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
                           filter === opt.value ? "bg-tint text-deep font-medium" : "text-ink hover:bg-wash"
                         }`}
@@ -1760,6 +2112,31 @@ export function MedicalTimelineTab({
               )}
             </div>
           </div>
+          <ChronFilterSelect
+            label="Medical Conditions"
+            value={condTiming}
+            options={[
+              { value: "all", label: "All Conditions" },
+              { value: "pre-incident", label: "Pre-Incident Conditions" },
+              { value: "post-incident", label: "Post-Incident Conditions" },
+            ]}
+            open={condOpen === "timing"}
+            onToggle={() => setCondOpen((o) => (o === "timing" ? null : "timing"))}
+            onPick={(v) => { setCondTiming(v); setCondOpen(null); setSubTab("conditions"); }}
+          />
+          <ChronFilterSelect
+            label="Condition Relationship"
+            value={condRelation}
+            options={[
+              { value: "all", label: "All Relationships" },
+              { value: "new", label: "New" },
+              { value: "aggravated", label: "Aggravated" },
+              { value: "related", label: "Related to Pre-existing" },
+            ]}
+            open={condOpen === "relation"}
+            onToggle={() => setCondOpen((o) => (o === "relation" ? null : "relation"))}
+            onPick={(v) => { setCondRelation(v); setCondOpen(null); setSubTab("conditions"); }}
+          />
         </div>
 
         {/* Timeline Navigator */}
@@ -1792,6 +2169,7 @@ export function MedicalTimelineTab({
           </button>
         </div>
       </div>
+      </div>
     </div>
 
     {/* Evidence Review Workspace — PDF viewer + AI analysis tools */}
@@ -1815,9 +2193,9 @@ export function MedicalTimelineTab({
     {/* Add Chronology — the active tab decides which form opens */}
     <AddChronologyDrawer
       open={addOpen}
-      kind={subTab}
+      kind={subTab === "event" ? "event" : "medical"}
       documents={attachableDocs}
-      existing={(subTab === "medical" ? medicalAll : eventAll).map((e) => ({ date: e.date, title: e.title, description: e.description }))}
+      existing={(timelineKind === "medical" ? medicalAll : eventAll).map((e) => ({ date: e.date, title: e.title, description: e.description }))}
       addedBy={CURRENT_USER}
       onCancel={() => setAddOpen(false)}
       onSubmit={addChronology}
@@ -1914,6 +2292,16 @@ export function billsForEvidence(evidence: string[]): DocumentBill[] {
 const DAMAGE_ICON: Record<string, typeof DollarSign> = {
   stethoscope: Stethoscope, dollar: DollarSign, heart: HeartPulse,
   activity: Activity, pin: MapPin, clipboard: ClipboardList,
+};
+
+// One icon per main economic category, from the set the stage already uses.
+const ECONOMIC_CATEGORY_ICON: Record<EconomicCategory, typeof DollarSign> = {
+  "Medical & Care Expenses": Stethoscope,
+  "Lost Earnings": Briefcase,
+  "Household Services": Home,
+  "Out-of-Pocket Expenses": Wallet,
+  "Property Damage": Car,
+  "Other Damages": ClipboardList,
 };
 
 // One economic damage as this stage renders it. The damage record itself is
@@ -2313,6 +2701,8 @@ interface DamageDraft {
   /** The economic category the damage is filed under. Whether it is economic
    *  or non-economic at all is a separate thing, and not edited here. */
   group: EconomicCategory;
+  /** The subcategory within `group`; empty for a damage kept at category level. */
+  subcategory: string;
 }
 
 const draftOf = (d: DamageItem): DamageDraft => ({
@@ -2324,10 +2714,11 @@ const draftOf = (d: DamageItem): DamageDraft => ({
   notes: d.notes ?? "",
   docs: d.docs.join(", "),
   group: d.group,
+  subcategory: d.subcategory ?? "",
 });
 
-const blankDraft = (group: EconomicCategory = "Other Expenses"): DamageDraft => ({
-  label: "", category: "", amount: "", description: "", reasoning: "", notes: "", docs: "", group,
+const blankDraft = (group: EconomicCategory = "Other Damages", subcategory = ""): DamageDraft => ({
+  label: "", category: "", amount: "", description: "", reasoning: "", notes: "", docs: "", group, subcategory,
 });
 
 const parseDocs = (s: string) => s.split(",").map((d) => d.trim()).filter(Boolean);
@@ -2541,15 +2932,15 @@ function DamageForm({
         <span className="eyebrow text-deep">{title}</span>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Damage" value={draft.label} onChange={set("label")} />
-        <Field label="Damage Type" value={draft.category} onChange={set("category")} />
-        <Field label="Amount" value={draft.amount} onChange={set("amount")} prefix="$" />
+        {/* Where the damage is filed, then how much, then what it is */}
         <div>
-          <label className="eyebrow block mb-1">Bucket</label>
+          <label className="eyebrow block mb-1">Category</label>
           <select
             value={draft.group}
             disabled={lockBucket}
-            onChange={(e) => setDraft({ ...draft, group: e.target.value as EconomicCategory })}
+            // A subcategory belongs to its category, so changing the category
+            // clears it rather than leaving one that no longer fits.
+            onChange={(e) => setDraft({ ...draft, group: e.target.value as EconomicCategory, subcategory: "" })}
             className="w-full rounded-lg border border-line bg-white px-2.5 py-1.5 text-sm text-ink focus:outline-none focus:border-brand transition-colors disabled:text-[#8A98A3]"
           >
             {ECONOMIC_CATEGORIES.map((c) => (
@@ -2557,6 +2948,23 @@ function DamageForm({
             ))}
           </select>
         </div>
+        <div>
+          <label className="eyebrow block mb-1">Subcategory</label>
+          <select
+            value={draft.subcategory}
+            disabled={lockBucket}
+            onChange={(e) => setDraft({ ...draft, subcategory: e.target.value })}
+            className="w-full rounded-lg border border-line bg-white px-2.5 py-1.5 text-sm text-ink focus:outline-none focus:border-brand transition-colors disabled:text-[#8A98A3]"
+          >
+            <option value="">— None —</option>
+            {(ECONOMIC_SUBCATEGORIES[draft.group] ?? []).map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+        </div>
+        <Field label="Amount" value={draft.amount} onChange={set("amount")} prefix="$" />
+        <Field label="Damage" value={draft.label} onChange={set("label")} />
+        <Field label="Damage Type" value={draft.category} onChange={set("category")} />
       </div>
       <div className="mt-3 space-y-3">
         <Field label="Description" value={draft.description} onChange={set("description")} multiline />
@@ -2720,9 +3128,14 @@ function DamageHistoryDrawer({
 }
 
 function DamageRow({
-  row, open, onToggle, onDetails, editing, onEdit, onCancelEdit, onSave, onHistory, onDelete,
+  row, open, onToggle, onDetails, editing, onEdit, onCancelEdit, onSave, onHistory, onDelete, title, compact = false,
 }: {
   row: EcoRow;
+  /** The name the row shows, when it stands for its subcategory rather than
+   *  under its own label. */
+  title?: string;
+  /** The lighter subcategory style: no icon, smaller text, no extra indent. */
+  compact?: boolean;
   open: boolean;
   onToggle: () => void;
   onDetails: () => void;
@@ -2761,13 +3174,15 @@ function DamageRow({
   }
 
   return (
-    <div className="py-2.5">
+    <div className={compact ? "py-2" : "py-2.5"}>
       <div className="flex items-center justify-between gap-3">
-        <button onClick={onToggle} aria-expanded={open} className="flex items-center gap-3 text-left min-w-0">
-          <div className="w-8 h-8 rounded-lg bg-tint flex items-center justify-center shrink-0">
-            <row.icon className="w-4 h-4 text-deep" strokeWidth={1.75} />
-          </div>
-          <span className="body-text truncate">{row.label}</span>
+        <button onClick={onToggle} aria-expanded={open} className={`flex items-center text-left min-w-0 ${compact ? "gap-1.5" : "gap-3"}`}>
+          {!compact && (
+            <div className="w-8 h-8 rounded-lg bg-tint flex items-center justify-center shrink-0">
+              <row.icon className="w-4 h-4 text-deep" strokeWidth={1.75} />
+            </div>
+          )}
+          <span className={compact ? "text-sm text-ink truncate" : "body-text truncate"}>{title ?? row.label}</span>
           {changed && (
             <span className="pill pill-neutral shrink-0">
               {row.item.provenance.startsWith("ai")
@@ -2793,7 +3208,7 @@ function DamageRow({
         </div>
       </div>
       {open && (
-        <div className="mt-2.5 ml-11 rounded-xl border border-line bg-white p-3.5">
+        <div className={`mt-2.5 rounded-xl border border-line bg-white p-3.5 ${compact ? "" : "ml-11"}`}>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="secondary-text">{row.reasoning}</p>
@@ -2883,6 +3298,43 @@ function DamageEditHistory({ audit }: { audit: DamageAudit[] }) {
   );
 }
 
+// ── Two-panel stage workspace ────────────────────────────────────────────────
+// The height a stage's two-panel workspace should take on desktop: whatever is
+// left beneath the case header when the page is at the top, so a static panel
+// on one side stays in view while the other side scrolls on its own. The page
+// scrolls inside <main>, not the window, so that is what gets measured. Below
+// the desktop breakpoint it returns null and the stage stacks normally.
+function useWorkspacePanelHeight(
+  ref: React.RefObject<HTMLElement>,
+  minHeight: number,
+  /** The static panel's content. Its height is also a floor, so the static
+   *  side is never cut short when it grows (a filter appearing, say). */
+  staticContentRef?: React.RefObject<HTMLElement>,
+): number | null {
+  const [height, setHeight] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const scroller = (el.closest("main") as HTMLElement | null) ?? document.documentElement;
+    const wide = window.matchMedia("(min-width: 1024px)");
+    const measure = () => {
+      if (!wide.matches) { setHeight(null); return; }
+      // Where the workspace starts within the page, independent of how far
+      // the page happens to be scrolled right now.
+      const top = el.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+      const floor = Math.max(minHeight, staticContentRef?.current?.offsetHeight ?? 0);
+      setHeight(Math.max(scroller.clientHeight - top - 24, floor));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(scroller);
+    if (staticContentRef?.current) ro.observe(staticContentRef.current);
+    wide.addEventListener("change", measure);
+    return () => { ro.disconnect(); wide.removeEventListener("change", measure); };
+  }, [ref, minHeight, staticContentRef]);
+  return height;
+}
+
 export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: TabProps) {
   // The damage record, live. The assistant writes to the same store, so an
   // applied change lands here without the attorney navigating anywhere.
@@ -2893,20 +3345,27 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
   const subtotal = economicRows.reduce((s, e) => s + e.value, 0);
   const nonEconomicItemsTotal = nonEconomicRows.reduce((s, e) => s + e.value, 0);
 
-  // Economic damages sit under the six categories, in the stage's own order. A
-  // category holding a single damage of the same name shows no heading — there
-  // is nothing a heading would tell the attorney that the row does not.
-  const economicGroups = ECONOMIC_CATEGORIES
-    .map((category) => {
-      const rows = economicRows.filter((e) => e.item.group === category);
-      return {
-        category,
-        rows,
-        subtotal: rows.reduce((sum, e) => sum + e.value, 0),
-        heading: rows.length > 1 || (rows.length === 1 && rows[0].label !== category),
-      };
-    })
-    .filter((g) => g.rows.length > 0);
+  // Economic damages sit under the six main categories, each with its fixed
+  // subcategories. Every category is always listed, with or without figures, so
+  // the attorney sees the whole taxonomy. A damage whose category is not one of
+  // the six (an older record) is shown under Other Damages rather than lost.
+  const categoryOf = (item: DamageItem): EconomicCategory => (isEconomicCategory(item.group) ? item.group : "Other Damages");
+  const economicGroups = ECONOMIC_CATEGORIES.map((category) => {
+    const subcategories = ECONOMIC_SUBCATEGORIES[category];
+    const rows = economicRows.filter((e) => categoryOf(e.item) === category);
+    return {
+      category,
+      subcategories: subcategories.map((sub) => {
+        const subRows = rows.filter((e) => e.item.subcategory === sub);
+        return { name: sub, rows: subRows, total: subRows.reduce((s, e) => s + e.value, 0) };
+      }),
+      // Damages filed under the category but no one subcategory — kept at
+      // category level rather than guessed into one.
+      categoryLevel: rows.filter((e) => !e.item.subcategory || !subcategories.includes(e.item.subcategory)),
+      rows,
+      total: rows.reduce((s, e) => s + e.value, 0),
+    };
+  });
 
   // ── Attorney editing ─────────────────────────────────────────────────────
   // Which row is in edit mode, which is pending deletion, whose history is
@@ -2950,7 +3409,9 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
     // any other, so it is diffed and recorded here rather than specially.
     if (item.bucket === "economic") {
       next.group = draft.group;
+      next.subcategory = draft.subcategory || undefined;
       note(DAMAGE_FIELD_LABEL.group, item.group, draft.group);
+      note("Subcategory", item.subcategory ?? "", draft.subcategory);
     }
 
     // A damage that now cites a different set of documents should say so in its
@@ -2976,6 +3437,7 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
         // form's own category decides which heading it files under.
         bucket: addingTo ?? "economic",
         group: draft.group,
+        subcategory: draft.subcategory || undefined,
         amount: parseMoney(draft.amount),
         description: draft.description,
         category: draft.category.trim() || draft.label.trim(),
@@ -2992,13 +3454,31 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
       "Added by attorney on the Damages Analysis stage.",
     );
     setAddingTo(null);
+    setAddAt(null);
   };
 
-  const openAdd = (bucket: DamageBucket) => {
-    setAddDraft(blankDraft());
+  // Where the economic add form opens: at the top of the list (from the header's
+  // Add Damage), or inside one subcategory with that category and subcategory
+  // already chosen (from an empty subcategory's edit action).
+  const [addAt, setAddAt] = useState<string | null>(null);
+  const openAdd = (bucket: DamageBucket, group?: EconomicCategory, subcategory?: string) => {
+    setAddDraft(blankDraft(group, subcategory));
     setEditingId(null);
     setAddingTo(bucket);
+    setAddAt(group && subcategory ? `${group}::${subcategory}` : null);
+    if (group) setOpenCats((prev) => new Set(prev).add(group));
   };
+  const cancelAdd = () => { setAddingTo(null); setAddAt(null); };
+
+  // Which main categories are open. Medical & Care Expenses — the first and
+  // most detailed — starts open; the rest start closed so the list stays short.
+  const [openCats, setOpenCats] = useState<Set<string>>(() => new Set(["Medical & Care Expenses"]));
+  const toggleCat = (c: string) =>
+    setOpenCats((prev) => { const n = new Set(prev); if (n.has(c)) n.delete(c); else n.add(c); return n; });
+  // Which subcategories have their damages showing, keyed "category::subcategory".
+  const [openSubs, setOpenSubs] = useState<Set<string>>(new Set());
+  const toggleSub = (k: string) =>
+    setOpenSubs((prev) => { const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n; });
 
   // Handlers a damage row needs, or undefined outside the provider — which is
   // what leaves the row read-only rather than half-editable.
@@ -3252,25 +3732,49 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
   const evidenceDocTotal = 42;
 
   // Quick-action targets — each sidebar card scrolls to its section on the right.
-  const damagesSummaryRef = useRef<HTMLDivElement>(null);
   const economicRef = useRef<HTMLDivElement>(null);
   const nonEconomicRef = useRef<HTMLDivElement>(null);
   const evidenceRef = useRef<HTMLDivElement>(null);
-  const scrollTo = (ref: React.RefObject<HTMLDivElement>) =>
-    ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  // Two-panel workspace on desktop: Quick Actions stays put on the left while
+  // the damage sections scroll on the right. The floor is what the Quick
+  // Actions card needs to show everything it holds.
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const sectionsRef = useRef<HTMLDivElement>(null);
+  const panelHeight = useWorkspacePanelHeight(workspaceRef, 520);
+
+  // Jump to a section. In the two-panel workspace only the sections pane moves
+  // — scrollIntoView would also scroll the page and carry Quick Actions away.
+  const scrollTo = (ref: React.RefObject<HTMLDivElement>) => {
+    const el = ref.current;
+    const pane = sectionsRef.current;
+    if (!el) return;
+    if (panelHeight && pane) {
+      const top = el.getBoundingClientRect().top - pane.getBoundingClientRect().top + pane.scrollTop;
+      pane.scrollTo({ top, behavior: "smooth" });
+    } else {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  };
 
   return (
     <>
-    <div className="grid grid-cols-1 lg:grid-cols-20 gap-8 items-start">
+    <div
+      ref={workspaceRef}
+      className="grid grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)] gap-8 items-start lg:items-stretch"
+      style={panelHeight ? { height: panelHeight } : undefined}
+    >
 
-      {/* RIGHT — narrow, tall Quick Actions sidebar (sticky) */}
-      <div className="lg:col-span-5 lg:order-2 lg:sticky lg:top-[176px] self-start">
-        <div className="lg-card p-5 flex flex-col gap-3 lg:min-h-[600px]">
+      {/* LEFT — Quick Actions, static while the damage sections scroll. The
+          card fills the panel height, which keeps Estimated Value and the CTA
+          at its foot. */}
+      <div className="min-w-0 lg:min-h-0">
+        <div className="lg-card p-5 flex flex-col gap-3 lg:h-full">
           <h3 className="card-title">Quick Actions</h3>
 
-          {/* card 1 — Damages Summary (scrolls to the summary) */}
+          {/* card 1 — Damages Summary. The page now opens on Damage Computation,
+              so this takes the attorney to the top of it. */}
           <button
-            onClick={() => scrollTo(damagesSummaryRef)}
+            onClick={() => scrollTo(economicRef)}
             className="rounded-xl border border-line bg-offwhite p-4 text-left transition-all hover:border-brand hover:bg-tint hover:shadow-sm"
           >
             <div className="flex items-center gap-2">
@@ -3319,35 +3823,14 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
         </div>
       </div>
 
-      {/* LEFT — all sections */}
-      <div className="lg:col-span-15 lg:order-1 space-y-12">
-
-      {/* Damages Summary — attorney-ready overview, one big card, top of page */}
-      <div ref={damagesSummaryRef} className="lg-card bg-offwhite p-6 space-y-5 scroll-mt-[176px]">
-        <h2 className="section-header">Damages Summary</h2>
-        <div className="bg-tint border border-[#D6F2F7] rounded-xl p-5 space-y-4">
-          <p className="body-text leading-relaxed">
-            Verified economic damages total <strong className="font-semibold text-ink">{formatUSD(economicTotal)}</strong>, supported by
-            medical records, billing statements, employment records, and rehabilitation documentation.
-          </p>
-          <p className="body-text leading-relaxed">
-            Based on the severity of injuries, permanent impairment, and strong liability evidence, LECO estimates{" "}
-            <strong className="font-semibold text-ink">{formatUSD(nonEconomicTotal)}</strong> in Non-Economic Damages using a{" "}
-            <strong className="font-semibold text-ink">{fmtMult(overallMult)} multiplier</strong>.
-          </p>
-        </div>
-        <div className="bg-ink rounded-xl px-6 py-5 flex items-center justify-between gap-4">
-          <div className="eyebrow text-soft">Current Projected Settlement Impact</div>
-          <div className="text-white font-bold tabular-nums shrink-0" style={{ fontSize: "24px", lineHeight: 1.1, letterSpacing: "-0.02em" }}>
-            {formatUSD(recommendedSettlement)}
-          </div>
-        </div>
-      </div>
+      {/* RIGHT — all damage sections, in their own scroll area; reaching its
+          end does not carry on into the page */}
+      <div ref={sectionsRef} className="min-w-0 space-y-12 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:-mr-3 lg:pr-3">
 
       {/* 1 + 2 — Damage Computation (single card: Economic · Non-Economic · Total).
           Adopts the Valuation page's "Damage Computation" design, minus the
           interactive multiplier controls — those stay on the Valuation page. */}
-      <div ref={economicRef} className="lg-card bg-offwhite p-6 scroll-mt-[176px]">
+      <div ref={economicRef} className="lg-card bg-offwhite p-6 scroll-mt-[176px] lg:scroll-mt-0">
         <div className="flex items-center gap-2 mb-5">
           <DollarSign className="w-5 h-5 text-[#5B6B78]" strokeWidth={1.75} />
           <h2 className="section-header">Damage Computation</h2>
@@ -3396,46 +3879,169 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
               </div>
             </div>
             <div className="p-5">
-              {addingTo === "economic" && (
+              {addingTo === "economic" && addAt === null && (
                 <div className="mb-4">
                   <DamageForm
                     title="Add Economic Damage"
                     draft={addDraft}
                     setDraft={setAddDraft}
-                    onCancel={() => setAddingTo(null)}
+                    onCancel={cancelAdd}
                     onSave={() => addDamage(addDraft)}
                     saveLabel="Add Damage"
                   />
                 </div>
               )}
-              <div className="divide-y divide-line">
-                {economicGroups.map((g) => (
-                  <div key={g.category} className={g.heading ? "py-1" : ""}>
-                    {/* A heading only where it adds something: a category
-                        holding one damage of the same name is just that row. */}
-                    {g.heading && (
-                      <div className="flex items-center justify-between gap-3 pt-2.5 pb-1">
-                        <span className="eyebrow">{g.category}</span>
-                        <span className="text-xs font-semibold text-ink tabular-nums">{formatUSD(g.subtotal)}</span>
-                      </div>
-                    )}
-                    <div className={g.heading ? "pl-3 border-l-2 border-line divide-y divide-line" : "divide-y divide-line"}>
-                      {g.rows.map((e) => (
-                        <DamageRow
-                          key={e.item.id}
-                          row={e}
-                          open={ecoRowsOpen.has(e.label)}
-                          onToggle={() => toggleEcoRow(e.label)}
-                          onDetails={() => openDrawer(e)}
-                          {...rowActions(e.item)}
-                        />
-                      ))}
+              {/* The six main categories. Each opens to its subcategories; a
+                  subcategory with no damage on file shows $— rather than a
+                  figure, since nothing has been calculated for it. */}
+              <div className="space-y-3">
+                {economicGroups.map((g) => {
+                  const Icon = ECONOMIC_CATEGORY_ICON[g.category];
+                  const catOpen = openCats.has(g.category);
+                  const hasFigures = g.rows.length > 0;
+                  return (
+                    <div key={g.category} className="rounded-xl border border-line bg-white overflow-hidden">
+                      <button
+                        onClick={() => toggleCat(g.category)}
+                        aria-expanded={catOpen}
+                        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-wash transition-colors"
+                      >
+                        <div className="w-8 h-8 rounded-lg bg-tint flex items-center justify-center shrink-0">
+                          <Icon className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                        </div>
+                        <span className="card-title flex-1 min-w-0 truncate">{g.category}</span>
+                        {/* How many subcategories the category holds */}
+                        <span
+                          title={`${g.subcategories.length} subcategories`}
+                          className="text-xs font-semibold text-deep bg-tint border border-[#D6F2F7] rounded-full px-2 py-0.5 tabular-nums shrink-0"
+                        >
+                          {g.subcategories.length}
+                        </span>
+                        <span className={`w-28 text-right text-sm tabular-nums shrink-0 ${hasFigures ? "font-semibold text-ink" : "text-[#8A98A3]"}`}>
+                          {hasFigures ? formatUSD(g.total) : "$—"}
+                        </span>
+                        <ChevronDown className={`w-4 h-4 text-[#5B6B78] shrink-0 transition-transform ${catOpen ? "rotate-180" : ""}`} strokeWidth={1.75} />
+                      </button>
+
+                      {catOpen && (
+                        <div className="border-t border-line bg-offwhite px-4 py-1.5">
+                          {/* Damages on file for the category as a whole, where
+                              the evidence does not tie them to one subcategory */}
+                          {g.categoryLevel.length > 0 && (
+                            <div className="pb-1.5 mb-1 border-b border-line">
+                              <div className="eyebrow pt-2.5 pl-11">Recorded at category level</div>
+                              <div className="pl-11 divide-y divide-line">
+                                {g.categoryLevel.map((e) => (
+                                  <DamageRow
+                                    key={e.item.id}
+                                    row={e}
+                                    open={ecoRowsOpen.has(e.label)}
+                                    onToggle={() => toggleEcoRow(e.label)}
+                                    onDetails={() => openDrawer(e)}
+                                    {...rowActions(e.item)}
+                                  />
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="divide-y divide-line">
+                            {g.subcategories.map((s) => {
+                              const key = `${g.category}::${s.name}`;
+                              const has = s.rows.length > 0;
+                              // Open to show its damages, or while one of them
+                              // is being edited (the form lives in the row).
+                              const subOpen = openSubs.has(key) || s.rows.some((e) => e.item.id === editingId);
+                              const onEditSub = () => {
+                                if (s.rows.length === 0) openAdd("economic", g.category, s.name);
+                                else toggleSub(key);
+                              };
+                              // A subcategory holding one damage is that damage's
+                              // row: its name, amount, edit and evidence details.
+                              if (s.rows.length === 1) {
+                                const e = s.rows[0];
+                                return (
+                                  <div key={s.name} className="pl-11">
+                                    <DamageRow
+                                      compact
+                                      title={s.name}
+                                      row={e}
+                                      open={ecoRowsOpen.has(e.label)}
+                                      onToggle={() => toggleEcoRow(e.label)}
+                                      onDetails={() => openDrawer(e)}
+                                      {...rowActions(e.item)}
+                                    />
+                                  </div>
+                                );
+                              }
+                              return (
+                                <div key={s.name} className="py-2">
+                                  <div className="flex items-center justify-between gap-3 pl-11">
+                                    {has ? (
+                                      <button
+                                        onClick={() => toggleSub(key)}
+                                        aria-expanded={subOpen}
+                                        className="flex items-center gap-1.5 min-w-0 text-left text-sm text-ink hover:text-deep transition-colors"
+                                      >
+                                        <span className="truncate">{s.name}</span>
+                                        <ChevronDown className={`w-3.5 h-3.5 text-[#5B6B78] shrink-0 transition-transform ${subOpen ? "rotate-180" : ""}`} strokeWidth={1.75} />
+                                      </button>
+                                    ) : (
+                                      <span className="text-sm text-[#5B6B78] truncate min-w-0">{s.name}</span>
+                                    )}
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <span className={`text-sm tabular-nums ${has ? "font-medium text-ink" : "text-[#8A98A3]"}`}>
+                                        {has ? formatUSD(s.total) : "$—"}
+                                      </span>
+                                      {damages && (
+                                        <button
+                                          onClick={onEditSub}
+                                          title={has ? "Edit damage" : "Add a damage here"}
+                                          aria-label={has ? `Edit ${s.name}` : `Add a damage to ${s.name}`}
+                                          className="p-1.5 rounded-lg text-[#8A98A3] hover:bg-tint hover:text-deep transition-colors"
+                                        >
+                                          <Pencil className="w-3.5 h-3.5" strokeWidth={1.75} />
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {addingTo === "economic" && addAt === key && (
+                                    <div className="pl-11 pt-2">
+                                      <DamageForm
+                                        title={`Add to ${s.name}`}
+                                        draft={addDraft}
+                                        setDraft={setAddDraft}
+                                        onCancel={cancelAdd}
+                                        onSave={() => addDamage(addDraft)}
+                                        saveLabel="Add Damage"
+                                      />
+                                    </div>
+                                  )}
+
+                                  {has && subOpen && (
+                                    <div className="pl-11 mt-1 divide-y divide-line">
+                                      {s.rows.map((e) => (
+                                        <DamageRow
+                                          key={e.item.id}
+                                          row={e}
+                                          open={ecoRowsOpen.has(e.label)}
+                                          onToggle={() => toggleEcoRow(e.label)}
+                                          onDetails={() => openDrawer(e)}
+                                          {...rowActions(e.item)}
+                                        />
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))}
-                {economicRows.length === 0 && (
-                  <p className="secondary-text py-2.5">No economic damages are on file.</p>
-                )}
+                  );
+                })}
               </div>
               <div className="mt-3 pt-3 border-t-2 border-line flex items-center justify-between">
                 <span className="text-sm font-semibold text-ink">Economic Damages Subtotal</span>
@@ -3447,7 +4053,7 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
 
           {/* Non-Economic Damages — interactive attorney review workspace */}
           {compTab === "noneconomic" && (
-          <div ref={nonEconomicRef} className="border border-line rounded-xl overflow-hidden scroll-mt-[176px]">
+          <div ref={nonEconomicRef} className="border border-line rounded-xl overflow-hidden scroll-mt-[176px] lg:scroll-mt-0">
             <div className="bg-tint px-5 py-3 border-b border-line flex items-center justify-between gap-3">
               <h3 className="card-title">Non-Economic Damages</h3>
               {anyOverride && <span className="pill pill-progress"><Pencil className="w-3.5 h-3.5" strokeWidth={1.75} /> Attorney-adjusted</span>}
@@ -3696,7 +4302,7 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
       </div>
 
       {/* 3 — Verified Damage Evidence (new) — one big card; each category is a bordered tile */}
-      <div ref={evidenceRef} className="lg-card bg-offwhite p-6 scroll-mt-[176px]">
+      <div ref={evidenceRef} className="lg-card bg-offwhite p-6 scroll-mt-[176px] lg:scroll-mt-0">
         <div className="mb-5">
           <h2 className="section-header">Verified Evidence by Damage Type</h2>
           <p className="secondary-text mt-1 max-w-2xl">How each economic amount and non-economic factor is supported by evidence on file. Open any to review its documents.</p>
@@ -5560,28 +6166,9 @@ export function LiabilityAnalysisTab({ goTo, documents }: TabProps) {
 
   // ── Two-panel workspace ──────────────────────────────────────────────────
   // On desktop the stage fills the height left beneath the case header, so the
-  // framework stays in view and only the violation list scrolls. The page
-  // scrolls inside <main>, not the window, so that is what gets measured.
+  // framework stays in view and only the violation list scrolls.
   const workspaceRef = useRef<HTMLDivElement>(null);
-  const [panelHeight, setPanelHeight] = useState<number | null>(null);
-  useLayoutEffect(() => {
-    const el = workspaceRef.current;
-    if (!el) return;
-    const scroller = (el.closest("main") as HTMLElement | null) ?? document.documentElement;
-    const wide = window.matchMedia("(min-width: 1024px)");
-    const measure = () => {
-      if (!wide.matches) { setPanelHeight(null); return; }
-      // Where the workspace starts within the page, independent of how far
-      // the page happens to be scrolled right now.
-      const top = el.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
-      setPanelHeight(Math.max(scroller.clientHeight - top - 24, 480));
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(scroller);
-    wide.addEventListener("change", measure);
-    return () => { ro.disconnect(); wide.removeEventListener("change", measure); };
-  }, []);
+  const panelHeight = useWorkspacePanelHeight(workspaceRef, 480);
 
   return (
     <>

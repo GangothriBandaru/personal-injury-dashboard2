@@ -1,5 +1,37 @@
 import { useState } from "react";
 import { ArrowRight } from "lucide-react";
+import {
+  PRACTITIONERS, TREATING_PRACTITIONERS, hospitalById, formatExperience,
+} from "../practitioners/practitionerData";
+
+// The treating physician and the comparable specialists come from the shared
+// practitioner record, which the Case Overview's Medical Practitioners panel
+// reads too. Shaped here as this section has always displayed them.
+const physician = TREATING_PRACTITIONERS[0];
+const physicianHospital = hospitalById(physician?.hospitalId);
+const treatingPhysician = {
+  name: physician?.name ?? "",
+  title: physician?.role ?? "",
+  specialization: physician?.specializations.join(" · ") ?? "",
+  experience: formatExperience(physician?.experienceYears) ?? "Not available",
+  hospital: physicianHospital?.name ?? "Not available",
+  hospitalLocation: physicianHospital?.location ?? "Not available",
+  role: physician?.caseRole ?? "Not available",
+};
+const similarExperts = PRACTITIONERS
+  .filter((p) => physician && p.similarity?.[physician.id] != null)
+  .sort((a, b) => b.similarity![physician!.id] - a.similarity![physician!.id])
+  .map((p) => {
+    const h = hospitalById(p.hospitalId);
+    return {
+      name: p.name,
+      matchPercentage: p.similarity![physician!.id],
+      title: p.role,
+      experience: formatExperience(p.experienceYears) ?? "Not available",
+      hospital: h?.name ?? "Not available",
+      expertise: [...p.specializations, ...(h?.locationType === "Metro" ? ["Metro Hospital"] : [])],
+    };
+  });
 
 const injuryIntelligenceData = {
   summary: "Severe neurological injury with permanent functional impairment",
@@ -14,19 +46,8 @@ const injuryIntelligenceData = {
     shortTermImpact: ["Acute neurological deterioration", "Emergency hospitalization", "Intensive medical treatment"],
     longTermImpact: ["Permanent functional limitations", "Ongoing medical care", "Significant loss of independence"],
   },
-  treatingPhysician: {
-    name: "Dr. Sarah Mitchell",
-    title: "Neurologist",
-    specialization: "Vascular Neurology",
-    experience: "18 years",
-    hospital: "Northwestern Memorial Hospital",
-    hospitalLocation: "Chicago, Illinois",
-    role: "Treated the plaintiff following the ischemic stroke",
-  },
-  similarExperts: [
-    { name: "Dr. Michael Chen", matchPercentage: 92, title: "Vascular Neurologist", experience: "17 years", hospital: "Rush University Medical Center", expertise: ["Vascular Neurology", "Stroke Care", "Metro Hospital"] },
-    { name: "Dr. Emily Carter", matchPercentage: 88, title: "Neurologist", experience: "20 years", hospital: "University Medical Center", expertise: ["Neurology", "Stroke Expertise", "Metro Hospital"] },
-  ],
+  treatingPhysician,
+  similarExperts,
 };
 
 export function InjuryIntelligenceSection() {

@@ -1475,9 +1475,9 @@ export function AssistantPanel() {
       {
         id, label: prop.label, bucket: prop.bucket, amount: prop.amount,
         description: prop.description, category: prop.category, reasoning: prop.reasoning,
-        // A damage the assistant adds is filed under Other Expenses unless it
+        // A damage the assistant adds is filed under Other Damages unless it
         // names one of the case's own categories.
-        group: isEconomicCategory(prop.label) ? prop.label : "Other Expenses",
+        group: isEconomicCategory(prop.label) ? prop.label : "Other Damages",
         docs: prop.docs, docCount: prop.docs.length, iconKey: "receipt",
         // Created through the attorney's instruction to the assistant, and not
         // yet backed by verified evidence — provenance and verification are

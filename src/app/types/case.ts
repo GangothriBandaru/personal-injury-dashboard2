@@ -109,6 +109,17 @@ export interface AnalysisFinding {
   conclusion: string;
   sources: string[];
   evidence: FindingEvidence[];
+  // ── Injury signals only: the condition relative to the incident ──
+  // Each is set only where the case record establishes it. Absent means "not
+  // established", and the UI says so rather than filling in a value.
+  /** Whether the condition was documented before or after the incident. */
+  timing?: "pre-incident" | "post-incident";
+  /** Clinical severity, as assessed in the record. */
+  severity?: "Mild" | "Moderate" | "Severe" | "Critical";
+  /** How a post-incident condition relates to a pre-existing one. */
+  relationship?: "new" | "aggravated" | "related";
+  /** The pre-existing condition a relationship refers to. */
+  relatedCondition?: string;
 }
 
 export function generateAnalysisFindings(categories: ClassificationCategory[]): AnalysisFinding[] {
@@ -210,10 +221,15 @@ export function generateAnalysisFindings(categories: ClassificationCategory[]): 
     });
   }
 
+  // Every injury signal below is drawn from records made after the collision
+  // (admission, imaging, treatment, therapy), so each is a post-incident
+  // finding. None of them records a severity or a relationship to a
+  // pre-existing condition, and none is set here.
   if (medicalCat && medicalCat.docs.length > 0) {
     findings.push({
       tag: "CLINICAL DISABILITY ONSET",
       kind: "injury",
+      timing: "post-incident",
       title: "Cervical Cord Compression",
       description:
         "MRI findings confirm C5-C6 and C6-C7 disc herniations causing neurological compression consistent with the reported mechanism of injury.",
@@ -229,6 +245,7 @@ export function generateAnalysisFindings(categories: ClassificationCategory[]): 
     findings.push({
       tag: "CAUSATION LINKAGE",
       kind: "injury",
+      timing: "post-incident",
       title: "Treatment Consistent With Trauma",
       description:
         "Treatment records document a continuous course of care beginning immediately after the incident, supporting causation.",
@@ -243,6 +260,7 @@ export function generateAnalysisFindings(categories: ClassificationCategory[]): 
     findings.push({
       tag: "FUNCTIONAL IMPAIRMENT",
       kind: "injury",
+      timing: "post-incident",
       title: "Ongoing Physical Limitations",
       description:
         "Physical therapy notes document persistent range-of-motion deficits and chronic pain affecting daily function.",
@@ -257,6 +275,7 @@ export function generateAnalysisFindings(categories: ClassificationCategory[]): 
     findings.push({
       tag: "EMERGENCY PRESENTATION",
       kind: "injury",
+      timing: "post-incident",
       title: "Acute Symptoms On Admission",
       description:
         "Emergency admission records document acute neurological symptoms present on arrival, establishing baseline injury severity.",
@@ -271,6 +290,7 @@ export function generateAnalysisFindings(categories: ClassificationCategory[]): 
     findings.push({
       tag: "TREATMENT INTENSITY",
       kind: "injury",
+      timing: "post-incident",
       title: "Sustained Course Of Care",
       description:
         "Records reflect a sustained, escalating course of treatment over several months, consistent with a significant injury.",
@@ -285,6 +305,7 @@ export function generateAnalysisFindings(categories: ClassificationCategory[]): 
     findings.push({
       tag: "SPECIALIST REFERRAL",
       kind: "injury",
+      timing: "post-incident",
       title: "Neurology & Rehabilitation Referral",
       description:
         "The plaintiff was referred to specialist care for ongoing neurological and rehabilitative management of the injury.",
@@ -299,6 +320,7 @@ export function generateAnalysisFindings(categories: ClassificationCategory[]): 
     findings.push({
       tag: "PROGNOSIS / PERMANENCY",
       kind: "injury",
+      timing: "post-incident",
       title: "Permanent Residual Impairment",
       description:
         "Clinical assessment indicates a guarded prognosis with permanent residual impairment expected to affect long-term function.",
@@ -313,6 +335,7 @@ export function generateAnalysisFindings(categories: ClassificationCategory[]): 
     findings.push({
       tag: "PAIN & SUFFERING",
       kind: "injury",
+      timing: "post-incident",
       title: "Documented Chronic Pain",
       description:
         "Treatment records consistently document chronic pain and its impact on the plaintiff's daily activities and quality of life.",
