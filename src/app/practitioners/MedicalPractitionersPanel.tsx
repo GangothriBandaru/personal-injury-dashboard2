@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  Stethoscope, Building2, ChevronLeft, ChevronRight, X, Search, UserRound, MapPin,
+  Stethoscope, Building2, ChevronLeft, ChevronRight, ChevronDown, X, Search, UserRound, MapPin,
+  Clock, Layers, Landmark, Network, Map as MapIcon, ArrowRight,
 } from "lucide-react";
 import {
   PRACTITIONERS, HOSPITALS, TREATING_PRACTITIONERS, HOSPITAL_SIZES, HOSPITAL_OWNERSHIPS,
@@ -16,13 +17,6 @@ import {
 
 const NA = "Not available";
 
-// Facilities named in the case evidence with no practitioner named against
-// them — listed so the attorney can see where care happened, without a name
-// being put to it.
-const FACILITIES_WITHOUT_PRACTITIONER = HOSPITALS.filter(
-  (h) => !PRACTITIONERS.some((p) => p.hospitalId === h.id) && h.id !== "northwestern-memorial",
-);
-
 // A labelled value; the record's value, or "Not available".
 function Fact({ label, value }: { label: string; value?: string }) {
   return (
@@ -35,16 +29,21 @@ function Fact({ label, value }: { label: string; value?: string }) {
   );
 }
 
-// The workplace facts, in the order the attorney reads them.
+// The workplace facts, in the order the attorney reads them. Hospital type is
+// the ownership class (Non-Profit / For-Profit / Government); organization is
+// Independent / System Affiliated / Network Hospital, and a system-affiliated
+// hospital also names its health system.
 function WorkplaceFacts({ hospital }: { hospital?: Hospital }) {
   return (
     <div>
-      <Fact label="Hospital Name" value={hospital?.name} />
+      <Fact label="Hospital / Workplace" value={hospital?.name} />
       <Fact label="Hospital Location" value={hospital?.location} />
       <Fact label="Hospital Size" value={hospital?.size} />
-      <Fact label="Hospital Type" value={hospital?.structure} />
-      <Fact label="Ownership" value={hospital?.ownership} />
-      <Fact label="System Affiliation" value={hospital?.healthSystem} />
+      <Fact label="Hospital Type" value={hospital?.ownership} />
+      <Fact label="Organization" value={hospital?.structure} />
+      {(hospital?.structure === "System Affiliated" || hospital?.healthSystem) && (
+        <Fact label="System Affiliation" value={hospital?.healthSystem} />
+      )}
       <Fact label="Network" value={hospital?.network} />
       <Fact label="Location Type" value={hospital?.locationType} />
       {hospital?.services && hospital.services.length > 0 && (
@@ -120,7 +119,7 @@ function matchHospital(h: Hospital, f: HospitalFilters) {
 }
 
 function FilterSelect({
-  label, value, onChange, options, anyLabel = "Any",
+  label, value, onChange, options, anyLabel = "All",
 }: { label: string; value: string; onChange: (v: string) => void; options: { value: string; label: string }[]; anyLabel?: string }) {
   return (
     <div>
@@ -197,23 +196,23 @@ function SimilarSearch({
             <>
               <FilterSelect label="Practitioner Type" value={pDraft.role} onChange={setP("role")} options={opts(ROLE_OPTIONS)} />
               <FilterSelect label="Specialization" value={pDraft.specialization} onChange={setP("specialization")} options={opts(SPECIALIZATION_OPTIONS)} />
-              <FilterSelect label="Experience" value={pDraft.minExperience} onChange={setP("minExperience")} options={EXPERIENCE_OPTIONS.map((y) => ({ value: y, label: `${y}+ years` }))} />
+              <FilterSelect label="Experience" value={pDraft.minExperience} onChange={setP("minExperience")} options={EXPERIENCE_OPTIONS.map((y) => ({ value: y, label: `${y}+ years` }))} anyLabel="Any" />
+              <FilterSelect label="Hospital Type" value={pDraft.ownership} onChange={setP("ownership")} options={opts(HOSPITAL_OWNERSHIPS)} />
               <FilterSelect label="Hospital Size" value={pDraft.size} onChange={setP("size")} options={opts(HOSPITAL_SIZES)} />
-              <FilterSelect label="Hospital Type" value={pDraft.structure} onChange={setP("structure")} options={opts(HOSPITAL_STRUCTURES)} />
-              <FilterSelect label="Ownership" value={pDraft.ownership} onChange={setP("ownership")} options={opts(HOSPITAL_OWNERSHIPS)} />
+              <FilterSelect label="Organization" value={pDraft.structure} onChange={setP("structure")} options={opts(HOSPITAL_STRUCTURES)} />
               <FilterSelect label="System Affiliation" value={pDraft.healthSystem} onChange={setP("healthSystem")} options={opts(SYSTEM_OPTIONS)} />
               <FilterSelect label="Network" value={pDraft.network} onChange={setP("network")} options={opts(NETWORK_OPTIONS)} />
-              <FilterSelect label="Location Type" value={pDraft.locationType} onChange={setP("locationType")} options={opts(LOCATION_TYPES)} />
               <FilterSelect label="Location" value={pDraft.location} onChange={setP("location")} options={opts(LOCATION_OPTIONS)} />
+              <FilterSelect label="Location Type" value={pDraft.locationType} onChange={setP("locationType")} options={opts(LOCATION_TYPES)} />
             </>
           ) : (
             <>
+              <FilterSelect label="Hospital Type / Ownership" value={hDraft.ownership} onChange={setH("ownership")} options={opts(HOSPITAL_OWNERSHIPS)} />
               <FilterSelect label="Hospital Size" value={hDraft.size} onChange={setH("size")} options={opts(HOSPITAL_SIZES)} />
-              <FilterSelect label="Hospital Type" value={hDraft.structure} onChange={setH("structure")} options={opts(HOSPITAL_STRUCTURES)} />
-              <FilterSelect label="Ownership" value={hDraft.ownership} onChange={setH("ownership")} options={opts(HOSPITAL_OWNERSHIPS)} />
+              <FilterSelect label="Organization" value={hDraft.structure} onChange={setH("structure")} options={opts(HOSPITAL_STRUCTURES)} />
               <FilterSelect label="Health System" value={hDraft.healthSystem} onChange={setH("healthSystem")} options={opts(SYSTEM_OPTIONS)} />
-              <FilterSelect label="Location Type" value={hDraft.locationType} onChange={setH("locationType")} options={opts(LOCATION_TYPES)} />
               <FilterSelect label="Location" value={hDraft.location} onChange={setH("location")} options={opts(LOCATION_OPTIONS)} />
+              <FilterSelect label="Location Type" value={hDraft.locationType} onChange={setH("locationType")} options={opts(LOCATION_TYPES)} />
               <FilterSelect label="Specialties & Services" value={hDraft.service} onChange={setH("service")} options={opts(SERVICE_OPTIONS)} />
             </>
           )}
@@ -429,85 +428,137 @@ function PractitionerDrawer({ stack, setStack, onClose }: { stack: View[]; setSt
   );
 }
 
-// ── The Case Overview card ────────────────────────────────────────────────────
+// ── The Chronology sidebar: Medical Practitioner ─────────────────────────────
+// The Case Snapshot card adapted for the practitioners who treated the
+// plaintiff: the same white card, the same light-gray information tiles in a
+// two-column grid, the same biography toggle on the lead tile and the same
+// full-width primary button. One practitioner is shown at a time; with more
+// than one, the name becomes a selector.
 
-export function MedicalPractitionersCard() {
+// A Case Snapshot information tile. A value the record does not hold reads
+// "Not available" in the muted tone.
+function SnapshotTile({ icon: Icon, label, value }: { icon: any; label: string; value?: string }) {
+  return (
+    <div className="rounded-xl border border-line bg-offwhite p-3 min-w-0">
+      {/* The sidebar is narrower than Case Overview's, so a long label wraps
+          rather than being cut short. */}
+      <div className="flex items-start gap-1.5 mb-1.5">
+        <Icon className="w-3.5 h-3.5 text-deep shrink-0 mt-px" strokeWidth={1.75} />
+        <span className="eyebrow leading-tight">{label}</span>
+      </div>
+      {value
+        ? <div className="text-sm font-semibold text-ink leading-snug break-words">{value}</div>
+        : <div className="text-sm text-[#8A98A3] leading-snug">{NA}</div>}
+    </div>
+  );
+}
+
+export function PractitionerSnapshotCard() {
+  const [selectedId, setSelectedId] = useState(TREATING_PRACTITIONERS[0]?.id);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [bioOpen, setBioOpen] = useState(false);
   const [stack, setStack] = useState<View[]>([]);
-  const open = (v: View) => setStack([v]);
+
+  const p = TREATING_PRACTITIONERS.find((x) => x.id === selectedId) ?? TREATING_PRACTITIONERS[0];
+  const h = hospitalById(p?.hospitalId);
+  const several = TREATING_PRACTITIONERS.length > 1;
+  const pick = (id: string) => { setSelectedId(id); setPickerOpen(false); setBioOpen(false); };
 
   return (
     <>
       <div className="lg-card p-6">
-        <div className="flex items-center justify-between gap-2 mb-4">
-          <h3 className="card-title">Medical Practitioners</h3>
-          <span className="text-xs font-semibold text-deep bg-tint border border-[#D6F2F7] rounded-full px-2 py-0.5 tabular-nums">
-            {TREATING_PRACTITIONERS.length}
-          </span>
-        </div>
+        <h3 className="card-title mb-4">Medical Practitioner</h3>
 
-        {TREATING_PRACTITIONERS.length === 0 ? (
+        {!p ? (
           <p className="secondary-text">No practitioners are named in the case record.</p>
         ) : (
-          <div className="space-y-2">
-            {TREATING_PRACTITIONERS.map((p) => {
-              const h = hospitalById(p.hospitalId);
-              return (
-                <button
-                  key={p.id}
-                  onClick={() => open({ kind: "practitioner", id: p.id })}
-                  className="w-full rounded-xl border border-line bg-offwhite p-3 text-left flex items-center gap-3 transition-all hover:border-brand hover:bg-tint"
-                >
-                  <div className="w-8 h-8 rounded-lg bg-tint flex items-center justify-center shrink-0">
-                    <Stethoscope className="w-4 h-4 text-deep" strokeWidth={1.75} />
+          <>
+            <div className="grid grid-cols-2 gap-2.5">
+              {/* Lead tile — the practitioner, with the biography toggle */}
+              <div className="col-span-2 rounded-xl border border-line bg-offwhite p-3">
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <UserRound className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+                    <span className="eyebrow truncate">Medical Practitioner</span>
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold text-ink leading-snug truncate">{p.name}</div>
-                    <div className="text-xs text-[#5B6B78] truncate">
-                      {p.role}{p.specializations.length > 0 ? ` · ${p.specializations.join(" · ")}` : ""}
-                    </div>
-                    <div className="text-xs text-[#5B6B78] truncate flex items-center gap-1">
-                      <MapPin className="w-3 h-3 shrink-0" strokeWidth={1.75} /> {h?.name ?? `Workplace ${NA.toLowerCase()}`}
-                    </div>
+                  <button
+                    onClick={() => setBioOpen((o) => !o)}
+                    className="flex items-center gap-1 text-xs font-medium text-deep hover:text-ink transition-colors shrink-0"
+                  >
+                    {bioOpen ? "Hide biography" : "View biography"}
+                    <ChevronDown className={`w-3.5 h-3.5 transition-transform ${bioOpen ? "rotate-180" : ""}`} strokeWidth={1.75} />
+                  </button>
+                </div>
+
+                {/* The name — a selector when the case has more than one */}
+                {several ? (
+                  <div className="relative">
+                    <button
+                      onClick={() => setPickerOpen((o) => !o)}
+                      aria-expanded={pickerOpen}
+                      className="w-full flex items-center justify-between gap-2 text-left text-sm font-semibold text-ink leading-snug hover:text-deep transition-colors"
+                    >
+                      <span className="truncate">{p.name}</span>
+                      <ChevronDown className={`w-4 h-4 text-deep shrink-0 transition-transform ${pickerOpen ? "rotate-180" : ""}`} strokeWidth={1.75} />
+                    </button>
+                    {pickerOpen && (
+                      <>
+                        <div className="fixed inset-0 z-10" onClick={() => setPickerOpen(false)} />
+                        <div className="absolute left-0 right-0 mt-1.5 z-20 rounded-lg border border-line bg-white shadow-lg p-1">
+                          {TREATING_PRACTITIONERS.map((x) => (
+                            <button
+                              key={x.id}
+                              onClick={() => pick(x.id)}
+                              className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
+                                x.id === p.id ? "bg-tint text-deep font-medium" : "text-ink hover:bg-wash"
+                              }`}
+                            >
+                              {x.name}
+                              <span className="block text-xs text-[#5B6B78]">{x.role}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
                   </div>
-                  <ChevronRight className="w-4 h-4 text-[#8A98A3] shrink-0" strokeWidth={1.75} />
-                </button>
-              );
-            })}
-          </div>
-        )}
+                ) : (
+                  <div className="text-sm font-semibold text-ink leading-snug break-words">{p.name}</div>
+                )}
+                <div className="text-xs text-[#5B6B78] mt-0.5">{p.role}</div>
 
-        {/* Where care happened without a practitioner being named */}
-        {FACILITIES_WITHOUT_PRACTITIONER.length > 0 && (
-          <div className="mt-4 pt-3 border-t border-line">
-            <div className="eyebrow mb-1.5">Treating Facilities — No Practitioner Named</div>
-            {FACILITIES_WITHOUT_PRACTITIONER.map((h) => (
-              <button
-                key={h.id}
-                onClick={() => open({ kind: "hospital", id: h.id })}
-                className="w-full flex items-center justify-between gap-2 py-1.5 text-left text-sm text-ink hover:text-deep transition-colors"
-              >
-                <span className="flex items-center gap-1.5 min-w-0">
-                  <Building2 className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
-                  <span className="truncate">{h.name}</span>
-                </span>
-                <ChevronRight className="w-4 h-4 text-[#8A98A3] shrink-0" strokeWidth={1.75} />
-              </button>
-            ))}
-          </div>
-        )}
+                {bioOpen && (
+                  <p className="secondary-text leading-relaxed mt-2.5 pt-2.5 border-t border-line">
+                    {p.biography ?? "Biography not available."}
+                  </p>
+                )}
+              </div>
 
-        {TREATING_PRACTITIONERS.length > 0 && (
-          <button
-            onClick={() => open({ kind: "search", fromId: TREATING_PRACTITIONERS[0].id })}
-            className="btn btn-secondary w-full gap-2 mt-4"
-          >
-            <Search className="w-4 h-4" strokeWidth={1.75} /> Find Similar
-          </button>
+              <SnapshotTile icon={Stethoscope} label="Specialization" value={p.specializations.join(" · ") || undefined} />
+              <SnapshotTile icon={Clock} label="Experience" value={formatExperience(p.experienceYears)} />
+              <SnapshotTile icon={Building2} label="Hospital / Workplace" value={h?.name} />
+              <SnapshotTile icon={MapPin} label="Hospital Location" value={h?.location} />
+              <SnapshotTile icon={Layers} label="Hospital Size" value={h?.size} />
+              <SnapshotTile icon={Landmark} label="Hospital Type" value={h?.ownership} />
+              <SnapshotTile
+                icon={Network}
+                label="Organization"
+                value={h?.structure && h.healthSystem ? `${h.structure} — ${h.healthSystem}` : h?.structure}
+              />
+              <SnapshotTile icon={MapIcon} label="Location Type" value={h?.locationType} />
+            </div>
+
+            {/* Find Similar Doctors — styled as Case Snapshot's View Chronology */}
+            <button
+              onClick={() => setStack([{ kind: "search", fromId: p.id }])}
+              className="btn btn-primary w-full gap-2 mt-4"
+            >
+              Find Similar Doctors <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
+            </button>
+          </>
         )}
       </div>
 
-      {/* Rendered at the page root: the card sits in a sticky column, which
-          would otherwise keep the drawer beneath the workspace header. */}
+      {/* Rendered at the page root, above the workspace header. */}
       {stack.length > 0 && createPortal(
         <PractitionerDrawer stack={stack} setStack={setStack} onClose={() => setStack([])} />,
         document.body,

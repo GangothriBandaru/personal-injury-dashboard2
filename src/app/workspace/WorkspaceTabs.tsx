@@ -7,7 +7,7 @@ import {
   HeartPulse, ClipboardList, Image as ImageIcon, Video, FileSignature, Quote,
   Pencil, RotateCcw, History, TrendingUp, TrendingDown, Info, Shield, Circle, Loader2, Bot, Send,
   Plus, UserPlus, Receipt, Trash2, Check,
-  ArrowUpRight, Briefcase, Home, Wallet, Car,
+  ArrowUpRight, ArrowDown, Link2, Briefcase, Home, Wallet, Car,
 } from "lucide-react";
 import type { AnalysisFinding, CaseDocument } from "../types/case";
 import { classifyDocuments } from "../types/case";
@@ -40,7 +40,7 @@ import {
   type EconomicCategory, type FieldChange,
 } from "../damages/DamagesContext";
 import { InjuryIntelligenceSection } from "../components/InjuryIntelligenceSection";
-import { MedicalPractitionersCard } from "../practitioners/MedicalPractitionersPanel";
+import { PractitionerSnapshotCard } from "../practitioners/MedicalPractitionersPanel";
 
 // ── Shared model & helpers ────────────────────────────────────────────────────
 
@@ -329,9 +329,8 @@ export function OverviewTab({ model, documents, goTo, onOpenInsurance }: TabProp
   return (
     <>
     <div className="grid grid-cols-1 lg:grid-cols-20 gap-8 items-start">
-      {/* LEFT — 30%. Sticky; when its cards are taller than the window it
-          scrolls on its own, so Medical Practitioners is never out of reach. */}
-      <div className="lg:col-span-6 space-y-6 lg:sticky lg:top-[176px] self-start lg:max-h-[calc(100vh-264px)] lg:overflow-y-auto lg:overscroll-contain lg:-mx-2 lg:px-2 lg:pb-1">
+      {/* LEFT — 30% */}
+      <div className="lg:col-span-6 space-y-6 lg:sticky lg:top-[176px] self-start">
         {/* Case Snapshot */}
         <div className="lg-card p-6">
           <h3 className="card-title mb-4">Case Snapshot</h3>
@@ -378,9 +377,6 @@ export function OverviewTab({ model, documents, goTo, onOpenInsurance }: TabProp
             <ClipboardList className="w-4 h-4" strokeWidth={1.75} /> View Chronology
           </button>
         </div>
-
-        {/* Medical Practitioners — who treated the plaintiff and where */}
-        <MedicalPractitionersCard />
       </div>
 
       {/* RIGHT — 70% */}
@@ -1291,22 +1287,55 @@ function EvidenceChips({ evidence, onOpen, align }: { evidence: string[]; onOpen
 export interface UserChronology { medical: ChronEvent[]; event: ChronEvent[] }
 export const EMPTY_USER_CHRONOLOGY: UserChronology = { medical: [], event: [] };
 
-// ── Medical Conditions: one Injury Signal ───────────────────────────────────
+// ── Medical Conditions: one condition ───────────────────────────────────────
 // Built like the Analysis stage's signal cards (eyebrow tag, title, summary,
-// evidence), with the three facts the comparison turns on — timing, severity
-// and relationship — shown as tags. Each shows the record's value or says it
-// is not established; none is ever inferred here.
+// evidence), with what the before/after reading turns on — timing, severity
+// and the relationship across the incident — shown as tags. Each shows the
+// record's value or says it is not established; none is ever inferred here.
+
+type ConditionRelation = NonNullable<AnalysisFinding["relationship"]>;
 
 const CONDITION_TIMING_LABEL: Record<NonNullable<AnalysisFinding["timing"]>, string> = {
   "pre-incident": "Pre-Incident",
   "post-incident": "Post-Incident",
 };
 
-const CONDITION_RELATION_LABEL: Record<NonNullable<AnalysisFinding["relationship"]>, string> = {
+const CONDITION_RELATION_LABEL: Record<ConditionRelation, string> = {
   new: "New",
   aggravated: "Aggravated",
-  related: "Related to Pre-existing",
+  worsened: "Worsened",
+  related: "Related",
+  unchanged: "Unchanged",
 };
+
+// What each relationship means, in the attorney's words.
+const CONDITION_RELATION_MEANING: Record<ConditionRelation, string> = {
+  new: "New condition after incident",
+  aggravated: "Pre-existing condition worsened after incident",
+  worsened: "Existing condition became more severe",
+  related: "Post-incident condition related to pre-existing condition",
+  unchanged: "Pre-existing condition continued without documented material change",
+};
+
+// The label on the line drawn from a pre-incident condition to its
+// post-incident one.
+const CONDITION_RELATION_CONNECTOR: Record<ConditionRelation, string> = {
+  new: "New after incident",
+  aggravated: "Aggravated by incident",
+  worsened: "Worsened after incident",
+  related: "Related — aggravation not established",
+  unchanged: "Continued without documented change",
+};
+
+// What a relationship rests on. A documented fact, a relationship the medical
+// evidence supports, and an AI inference are never presented as the same thing.
+const CONDITION_BASIS_LABEL: Record<NonNullable<AnalysisFinding["relationshipBasis"]>, string> = {
+  documented: "Documented fact",
+  evidence: "Supported by medical evidence",
+  ai: "AI inference — not verified",
+};
+
+const RELATIONSHIP_NOT_ESTABLISHED = "Relationship not established";
 
 // Severity and relationship → the product's existing status pills.
 const CONDITION_SEVERITY_PILL: Record<NonNullable<AnalysisFinding["severity"]>, string> = {
@@ -1316,11 +1345,23 @@ const CONDITION_SEVERITY_PILL: Record<NonNullable<AnalysisFinding["severity"]>, 
   Critical: "pill pill-risk",
 };
 
-const CONDITION_RELATION_PILL: Record<NonNullable<AnalysisFinding["relationship"]>, string> = {
+const CONDITION_RELATION_PILL: Record<ConditionRelation, string> = {
   new: "pill pill-neutral",
   aggravated: "pill pill-progress",
+  worsened: "pill pill-progress",
   related: "pill pill-neutral",
+  unchanged: "pill pill-neutral",
 };
+
+// Two conditions share a body part only when the record names the same part on
+// the same side — "Right leg" and "Left leg" stay separate. A match is shown as
+// worth checking, never as a relationship.
+const sameBodyPart = (a?: string, b?: string) =>
+  !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
+
+// A pre-incident condition and the post-incident condition the record relates
+// to it.
+interface ConditionPair { pre: AnalysisFinding; post: AnalysisFinding }
 
 // A labelled dropdown in the Chronology Filters card — the same control the
 // Medical / Case Events filter uses.
@@ -1372,17 +1413,30 @@ function ChronFilterSelect<T extends string>({
   );
 }
 
+function ConditionRelationTag({ relation }: { relation: ConditionRelation }) {
+  return (
+    <span className={`${CONDITION_RELATION_PILL[relation]} uppercase tracking-[0.06em]`}>
+      {CONDITION_RELATION_LABEL[relation]}
+    </span>
+  );
+}
+
 function InjurySignalCard({
-  signal, linkedPost = [], onPreview, onInsights,
+  signal, linkedPost = [], bodyPartMatches = [], onPreview, onInsights, onDetails,
 }: {
   signal: AnalysisFinding;
   /** For a pre-incident condition: the post-incident conditions the record
    *  relates to it, so the link reads from both ends. */
   linkedPost?: AnalysisFinding[];
+  /** Conditions on the other side of the incident naming the same body part
+   *  with no relationship recorded — shown as worth checking, nothing more. */
+  bodyPartMatches?: AnalysisFinding[];
   onPreview: () => void;
   onInsights: () => void;
+  onDetails: () => void;
 }) {
   const files = signal.evidence.map((e) => e.file);
+  const pre = signal.timing === "pre-incident";
   return (
     <div className="rounded-xl border border-line bg-white p-5 flex flex-col">
       <div className="eyebrow flex items-center gap-1.5 mb-2">
@@ -1391,67 +1445,67 @@ function InjurySignalCard({
       </div>
       <h3 className="card-title leading-snug">{signal.title}</h3>
 
-      {/* Timing and severity */}
+      {/* Timing, pre-existing, relationship and severity */}
       <div className="flex items-center gap-1.5 flex-wrap mt-2.5">
         {signal.timing
           ? <span className="pill pill-neutral uppercase tracking-[0.06em]">{CONDITION_TIMING_LABEL[signal.timing]}</span>
           : <span className="text-xs text-[#8A98A3]">Timing not established</span>}
+        {pre && <span className="pill pill-neutral uppercase tracking-[0.06em]">Pre-existing</span>}
+        {signal.relationship && <ConditionRelationTag relation={signal.relationship} />}
         {signal.severity
-          ? <span className={CONDITION_SEVERITY_PILL[signal.severity]}>{signal.severity}</span>
+          ? <span className={CONDITION_SEVERITY_PILL[signal.severity]}>Severity: {signal.severity}</span>
           : <span className="text-xs text-[#8A98A3]">Severity not assessed</span>}
       </div>
 
       <p className="body-text leading-relaxed mt-3">{signal.description}</p>
+      {signal.bodyPart && <p className="text-xs text-[#5B6B78] mt-1.5">Body part: {signal.bodyPart}</p>}
 
-      {/* Relationship. Where the record relates this condition to a pre-existing
-          one, the link is drawn: pre-existing condition → relationship → this. */}
-      {signal.timing !== "pre-incident" && (
+      {/* Relationship across the incident */}
+      {!pre && (
         signal.relationship ? (
-          <div className="mt-3 rounded-lg bg-tint border border-[#D6F2F7] p-3">
-            <div className="eyebrow mb-1.5">Relationship</div>
-            <div className="flex items-center gap-2 flex-wrap text-sm">
-              {signal.relatedCondition && (
-                <>
-                  <span className="font-medium text-ink">{signal.relatedCondition}</span>
-                  <span className="text-xs text-[#5B6B78]">Pre-incident</span>
-                  <ArrowRight className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
-                </>
-              )}
-              <span className={`${CONDITION_RELATION_PILL[signal.relationship]} uppercase tracking-[0.06em]`}>
-                {CONDITION_RELATION_LABEL[signal.relationship]}
-              </span>
-              {signal.relatedCondition && (
-                <>
-                  <ArrowRight className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
-                  <span className="font-medium text-ink">{signal.title}</span>
-                </>
-              )}
-            </div>
+          <div className="mt-3 rounded-lg bg-tint border border-[#D6F2F7] p-3 space-y-1">
+            <div className="eyebrow">Relationship</div>
+            <p className="text-sm font-medium text-ink">{CONDITION_RELATION_MEANING[signal.relationship]}</p>
+            {signal.relatedCondition && (
+              <p className="secondary-text">Pre-existing condition: <span className="font-medium text-ink">{signal.relatedCondition}</span></p>
+            )}
+            {signal.relationshipBasis && <p className="text-xs text-[#5B6B78]">{CONDITION_BASIS_LABEL[signal.relationshipBasis]}</p>}
           </div>
         ) : (
           <div className="mt-3 flex items-center gap-2 flex-wrap">
             <span className="eyebrow">Relationship</span>
-            <span className="text-xs text-[#8A98A3]">Not determined in the record</span>
+            <span className="text-xs text-[#8A98A3]">{RELATIONSHIP_NOT_ESTABLISHED}</span>
           </div>
         )
       )}
-      {signal.timing === "pre-incident" && linkedPost.length > 0 && (
+      {pre && linkedPost.length > 0 && (
         <div className="mt-3 rounded-lg bg-tint border border-[#D6F2F7] p-3">
-          <div className="eyebrow mb-1.5">After the Incident</div>
+          <div className="eyebrow mb-1.5">Linked to post-incident condition</div>
           <div className="space-y-1">
             {linkedPost.map((p) => (
               <div key={p.title} className="flex items-center gap-2 flex-wrap text-sm">
-                {p.relationship && (
-                  <span className={`${CONDITION_RELATION_PILL[p.relationship]} uppercase tracking-[0.06em]`}>
-                    {CONDITION_RELATION_LABEL[p.relationship]}
-                  </span>
-                )}
+                {p.relationship && <ConditionRelationTag relation={p.relationship} />}
                 <ArrowRight className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
                 <span className="font-medium text-ink">{p.title}</span>
               </div>
             ))}
           </div>
         </div>
+      )}
+      {pre && signal.relationship === "unchanged" && (
+        <div className="mt-3 rounded-lg bg-tint border border-[#D6F2F7] p-3 space-y-1">
+          <div className="eyebrow flex items-center gap-1">Continues into post-incident period <ArrowRight className="w-3 h-3" strokeWidth={2} /></div>
+          <p className="secondary-text">{CONDITION_RELATION_MEANING.unchanged}</p>
+          {signal.relationshipBasis && <p className="text-xs text-[#5B6B78]">{CONDITION_BASIS_LABEL[signal.relationshipBasis]}</p>}
+        </div>
+      )}
+
+      {/* Same body part on the other side of the incident, no relationship recorded */}
+      {bodyPartMatches.length > 0 && (
+        <p className="mt-3 flex items-start gap-1.5 text-xs text-[#5B6B78]">
+          <Info className="w-3.5 h-3.5 text-deep shrink-0 mt-px" strokeWidth={1.75} />
+          Same body part as {bodyPartMatches.map((m) => m.title).join(", ")} — {RELATIONSHIP_NOT_ESTABLISHED.toLowerCase()}.
+        </p>
       )}
 
       {/* Supporting evidence */}
@@ -1475,7 +1529,8 @@ function InjurySignalCard({
         )}
       </div>
 
-      {/* Preview & Insights — as on the Analysis stage's signal cards */}
+      {/* Preview & Insights — as on the Analysis stage's signal cards — and the
+          before/after detail */}
       <div className="mt-auto pt-4 flex items-center gap-2">
         <button
           onClick={onPreview}
@@ -1489,8 +1544,177 @@ function InjurySignalCard({
         >
           <Sparkles className="w-4 h-4" strokeWidth={1.75} /> Insights
         </button>
+        <button
+          onClick={onDetails}
+          className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-line text-deep rounded-lg text-sm font-medium hover:bg-tint transition-colors"
+        >
+          Details <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
+        </button>
       </div>
     </div>
+  );
+}
+
+// The line drawn from a pre-incident condition to the post-incident one the
+// record relates to it, labelled with the relationship.
+function ConditionConnector({ relation }: { relation?: ConditionRelation }) {
+  return (
+    <div className="flex flex-col items-center py-1.5" aria-hidden="true">
+      <div className="w-px h-4 bg-soft" />
+      <span className="rounded-full bg-tint border border-[#D6F2F7] px-3 py-1 text-xs font-semibold text-deep">
+        {relation ? CONDITION_RELATION_CONNECTOR[relation] : RELATIONSHIP_NOT_ESTABLISHED}
+      </span>
+      <div className="w-px h-4 bg-soft" />
+      <ArrowDown className="w-4 h-4 text-deep -mt-1" strokeWidth={1.75} />
+    </div>
+  );
+}
+
+// A right-hand drawer in the stage's existing pattern.
+function ConditionDrawer({ eyebrow, title, onClose, children }: { eyebrow: string; title: string; onClose: () => void; children: ReactNode }) {
+  return (
+    <>
+      <div className="fixed inset-0 bg-ink/40 z-[70]" onClick={onClose} />
+      <div className="fixed top-0 right-0 h-full w-[640px] max-w-[94vw] bg-offwhite shadow-xl z-[70] flex flex-col">
+        <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-line bg-white shrink-0">
+          <div className="min-w-0">
+            <div className="eyebrow mb-1">{eyebrow}</div>
+            <h2 className="card-title">{title}</h2>
+          </div>
+          <button onClick={onClose} title="Close" className="p-1.5 hover:bg-tint rounded-lg transition-colors shrink-0">
+            <X className="w-5 h-5 text-[#5B6B78]" strokeWidth={1.75} />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">{children}</div>
+      </div>
+    </>
+  );
+}
+
+const muted = (v?: string, empty = "Not available") =>
+  v ? <span className="text-ink">{v}</span> : <span className="text-[#8A98A3]">{empty}</span>;
+
+// One condition, before and after the incident, in a few short sections.
+function ConditionDetailDrawer({
+  pre, post, onClose, onPreview,
+}: { pre?: AnalysisFinding; post?: AnalysisFinding; onClose: () => void; onPreview: (s: AnalysisFinding) => void }) {
+  const relation = post?.relationship ?? (pre?.relationship === "unchanged" ? "unchanged" : undefined);
+  const basis = post?.relationshipBasis ?? pre?.relationshipBasis;
+  const side = (s: AnalysisFinding | undefined, when: string, empty: string) => (
+    s ? (
+      <div className="space-y-0.5 text-sm">
+        <div className="font-semibold text-ink">{s.title}</div>
+        <div className="text-[#5B6B78]">{when}</div>
+        <div>Severity: {muted(s.severity, "Not assessed")}</div>
+      </div>
+    ) : <p className="text-sm text-[#8A98A3]">{empty}</p>
+  );
+  const evidenceOf = [pre, post].filter((s): s is AnalysisFinding => !!s);
+  return (
+    <ConditionDrawer eyebrow="Condition Detail" title={(post ?? pre)!.title} onClose={onClose}>
+      <section className="rounded-xl border border-line bg-white p-4">
+        <div className="eyebrow mb-2">Pre-Incident</div>
+        {side(pre, "Documented before incident", "No documented pre-incident condition")}
+      </section>
+      <section className="rounded-xl border border-line bg-white p-4">
+        <div className="eyebrow mb-2">Post-Incident</div>
+        {post
+          ? side(post, "Documented after incident", "")
+          : <p className="text-sm text-[#8A98A3]">{relation === "unchanged" ? CONDITION_RELATION_MEANING.unchanged : "No post-incident condition is linked to it"}</p>}
+      </section>
+      <section className="rounded-xl border border-line bg-white p-4">
+        <div className="eyebrow mb-2">Change After Incident</div>
+        <p className="text-sm">{muted(post?.changeAfterIncident, "Not described in the record")}</p>
+      </section>
+      <section className="rounded-xl border border-line bg-white p-4">
+        <div className="eyebrow mb-2">Relationship</div>
+        {relation ? (
+          <div className="space-y-1">
+            <ConditionRelationTag relation={relation} />
+            <p className="text-sm font-medium text-ink">{CONDITION_RELATION_MEANING[relation]}</p>
+            {basis && <p className="text-xs text-[#5B6B78]">{CONDITION_BASIS_LABEL[basis]}</p>}
+          </div>
+        ) : <p className="text-sm text-[#8A98A3]">{RELATIONSHIP_NOT_ESTABLISHED}</p>}
+      </section>
+      <section className="rounded-xl border border-line bg-white p-4">
+        <div className="eyebrow mb-2">Supporting Evidence</div>
+        <div className="space-y-2">
+          {evidenceOf.map((s) => (
+            <div key={s.title} className="flex items-center gap-2 flex-wrap">
+              {s.evidence.map((e) => (
+                <button
+                  key={e.file}
+                  onClick={() => onPreview(s)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-offwhite px-2.5 py-1.5 text-xs text-ink hover:border-brand hover:bg-tint transition-all"
+                >
+                  <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+                  {e.file}
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+      </section>
+    </ConditionDrawer>
+  );
+}
+
+// Every pre-incident condition beside what became of it after the incident.
+function ConditionCompareDrawer({ rows, onClose }: { rows: { pre: AnalysisFinding; post?: AnalysisFinding }[]; onClose: () => void }) {
+  const fields: { label: string; get: (s: AnalysisFinding) => string | undefined }[] = [
+    { label: "Condition", get: (s) => s.title },
+    { label: "Body Part", get: (s) => s.bodyPart },
+    { label: "Severity", get: (s) => s.severity },
+    { label: "Symptoms", get: (s) => s.symptoms },
+    { label: "Treatment", get: (s) => s.treatment },
+    { label: "Functional Impact", get: (s) => s.functionalImpact },
+  ];
+  return (
+    <ConditionDrawer eyebrow="Medical Conditions" title="Compare Pre & Post-Incident" onClose={onClose}>
+      {rows.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-line bg-white p-5 secondary-text">
+          No pre-incident condition is documented in the case record, so there is nothing to compare yet.
+          Post-incident conditions are listed under Medical Conditions.
+        </div>
+      ) : rows.map(({ pre, post }) => {
+        const relation = post?.relationship ?? (pre.relationship === "unchanged" ? "unchanged" : undefined);
+        const basis = post?.relationshipBasis ?? pre.relationshipBasis;
+        return (
+          <section key={pre.title} className="rounded-xl border border-line bg-white p-4">
+            <div className="grid grid-cols-2 gap-x-4">
+              <div className="eyebrow pb-2 border-b border-line">Pre-Incident</div>
+              <div className="eyebrow pb-2 border-b border-line">Post-Incident</div>
+              {fields.map((f) => (
+                <div key={f.label} className="contents">
+                  <div className="py-2 border-b border-line">
+                    <div className="text-[11px] text-[#8A98A3] uppercase tracking-[0.06em]">{f.label}</div>
+                    <div className="text-sm">{muted(f.get(pre))}</div>
+                  </div>
+                  <div className="py-2 border-b border-line">
+                    <div className="text-[11px] text-[#8A98A3] uppercase tracking-[0.06em]">{f.label}</div>
+                    <div className="text-sm">{post ? muted(f.get(post)) : <span className="text-[#8A98A3]">—</span>}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 rounded-lg bg-tint border border-[#D6F2F7] p-3 flex items-center gap-2 flex-wrap">
+              <span className="eyebrow">Relationship</span>
+              {relation ? (
+                <>
+                  <ConditionRelationTag relation={relation} />
+                  <span className="text-sm text-ink">{CONDITION_RELATION_CONNECTOR[relation]}</span>
+                  {basis && <span className="text-xs text-[#5B6B78]">({CONDITION_BASIS_LABEL[basis]})</span>}
+                </>
+              ) : <span className="text-sm text-[#8A98A3]">{RELATIONSHIP_NOT_ESTABLISHED}</span>}
+            </div>
+            <div className="mt-3">
+              <div className="eyebrow mb-1.5">Supporting Evidence</div>
+              <p className="secondary-text">{[pre, post].filter(Boolean).flatMap((s) => s!.evidence.map((e) => e.file)).join(" · ") || "No supporting documents on file."}</p>
+            </div>
+          </section>
+        );
+      })}
+    </ConditionDrawer>
   );
 }
 
@@ -1581,19 +1805,52 @@ export function MedicalTimelineTab({
 
   // ── Medical Conditions ──
   // The case's own Injury Signals — the same findings the Analysis stage shows —
-  // grouped by when the condition was documented. Nothing here is derived or
-  // filled in: a signal shows only the timing, severity and relationship the
-  // record gives it.
+  // read as BEFORE → INCIDENT → AFTER. Pre- and post-incident are not exclusive:
+  // a post-incident condition the record relates to a pre-incident one is shown
+  // with it, joined by the relationship. Nothing here is derived or filled in —
+  // a link exists only where the record names it, never from a shared body part.
   const injurySignals = findings.filter((f) => f.kind === "injury");
-  const [condTiming, setCondTiming] = useState<"all" | "pre-incident" | "post-incident">("all");
-  const [condRelation, setCondRelation] = useState<"all" | "new" | "aggravated" | "related">("all");
+  const [condTiming, setCondTiming] = useState<"all" | "pre-incident" | "post-incident" | ConditionRelation>("all");
+  const [condRelation, setCondRelation] = useState<"all" | ConditionRelation | "none">("all");
   const [condOpen, setCondOpen] = useState<"timing" | "relation" | null>(null);
-  const shownSignals = injurySignals.filter(
-    (s) => (condTiming === "all" || s.timing === condTiming) && (condRelation === "all" || s.relationship === condRelation),
-  );
+  // The Medical Conditions filter picks a period or a relationship; Condition
+  // Relationship narrows by relationship, including "not established".
+  const timingView = condTiming === "pre-incident" || condTiming === "post-incident";
+  const matchesCondition = (s: AnalysisFinding) =>
+    condTiming === "all" ? true : timingView ? s.timing === condTiming : s.relationship === condTiming;
+  const matchesRelation = (s: AnalysisFinding) =>
+    condRelation === "all" ? true : condRelation === "none" ? !s.relationship : s.relationship === condRelation;
+  const narrowed = condTiming !== "all" || condRelation !== "all";
+
+  const allPre = injurySignals.filter((s) => s.timing === "pre-incident");
+  const allPost = injurySignals.filter((s) => s.timing === "post-incident");
+  // Pairs the record establishes: a post-incident condition naming the
+  // pre-incident condition it relates to.
+  const conditionPairs: ConditionPair[] = allPost
+    .map((post) => ({ pre: allPre.find((p) => p.title === post.relatedCondition), post }))
+    .filter((x): x is ConditionPair => !!x.pre);
+  const pairOf = (s: AnalysisFinding) => conditionPairs.find((p) => p.pre === s || p.post === s);
+  // Shown together, a pair is not repeated in the period lists. Filtering by a
+  // period lists every condition of that period, each carrying its link.
+  const shownPairs = timingView ? [] : conditionPairs.filter(({ post }) => matchesCondition(post) && matchesRelation(post));
+  const inShownPair = (s: AnalysisFinding) => shownPairs.some((p) => p.pre === s || p.post === s);
+  const shownSignals = injurySignals.filter((s) => matchesCondition(s) && matchesRelation(s) && !inShownPair(s));
   const preSignals = shownSignals.filter((s) => s.timing === "pre-incident");
   const postSignals = shownSignals.filter((s) => s.timing === "post-incident");
   const untimedSignals = shownSignals.filter((s) => !s.timing);
+  const visibleConditions = shownPairs.length + shownSignals.length;
+  // Conditions on the other side of the incident naming the same body part,
+  // with no relationship recorded between them — flagged, never classified.
+  const bodyPartMatches = (s: AnalysisFinding) => {
+    const linked = pairOf(s);
+    const other = s.timing === "pre-incident" ? allPost : s.timing === "post-incident" ? allPre : [];
+    return other.filter((o) => sameBodyPart(o.bodyPart, s.bodyPart) && linked?.pre !== o && linked?.post !== o);
+  };
+  // Every pre-incident condition beside what became of it, for the comparison.
+  const compareRows = allPre.map((pre) => ({ pre, post: conditionPairs.find((p) => p.pre === pre)?.post }));
+  const [compareOpen, setCompareOpen] = useState(false);
+  const [detailSignal, setDetailSignal] = useState<AnalysisFinding | null>(null);
+  const detailPair = detailSignal ? pairOf(detailSignal) : undefined;
   // A signal's evidence opens in the same review workspace as a timeline card —
   // Preview on the documents, Insights on the AI panel.
   const openSignalEvidence = (s: AnalysisFinding, view?: "insights") =>
@@ -1655,14 +1912,13 @@ export function MedicalTimelineTab({
   // Two-panel workspace on desktop, sized to the space beneath the case header.
   // The floor is what Filters and Timeline Navigator need to show in full.
   const workspaceRef = useRef<HTMLDivElement>(null);
-  const sidebarContentRef = useRef<HTMLDivElement>(null);
-  const panelHeight = useWorkspacePanelHeight(workspaceRef, 520, sidebarContentRef);
+  const panelHeight = useWorkspacePanelHeight(workspaceRef, 520);
 
   return (
     <>
     <div
       ref={workspaceRef}
-      className="w-full grid grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)] gap-6 items-start lg:items-stretch"
+      className="w-full grid grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)] gap-6 items-start lg:items-stretch"
       style={panelHeight ? { height: panelHeight } : undefined}
     >
       {/* RIGHT — the chronology, the one scroll area of the workspace; reaching
@@ -1779,23 +2035,61 @@ export function MedicalTimelineTab({
       )}
       </div>
 
-      {/* Medical Conditions — what existed before the incident, then what was
-          documented after it and how the two relate */}
+      {/* Medical Conditions — BEFORE → INCIDENT → AFTER: what existed before,
+          what was documented after, and how the record relates the two */}
       {subTab === "conditions" && (
         <div className="space-y-8">
-          <p className="secondary-text">
-            The case&apos;s Injury Signals, grouped by when each condition was documented. Severity and
-            relationship appear only where the record assesses them.
-          </p>
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <p className="secondary-text max-w-2xl">
+              The case&apos;s Injury Signals across the incident. A pre-existing condition the record links to a
+              post-incident one is shown with it; severity and relationship appear only where the record assesses them.
+            </p>
+            <button
+              onClick={() => setCompareOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-line bg-white text-sm font-semibold text-deep hover:border-brand hover:bg-tint transition-colors shrink-0"
+            >
+              Compare Pre &amp; Post-Incident <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
+            </button>
+          </div>
+
           {injurySignals.length === 0 ? (
             <div className="text-center py-16 secondary-text">No Injury Signals have been identified for this case.</div>
-          ) : shownSignals.length === 0 && condRelation !== "all" ? (
-            // A timing choice alone still shows its group and that group's own
-            // empty state; only a relationship that nothing carries empties it all.
+          ) : narrowed && !timingView && visibleConditions === 0 ? (
             <div className="text-center py-16 secondary-text">No conditions match the current filters.</div>
           ) : (
             <>
-              {condTiming !== "post-incident" && (
+              {/* Pre-existing conditions the record links across the incident */}
+              {shownPairs.length > 0 && (
+                <section className="space-y-4">
+                  <div className="flex items-center gap-2.5 pb-3 border-b border-line">
+                    <div className="w-8 h-8 rounded-lg bg-tint flex items-center justify-center shrink-0">
+                      <Link2 className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                    </div>
+                    <h3 className="card-title flex-1">Pre-existing Conditions Affected by the Incident</h3>
+                    <span className="text-xs font-semibold text-deep bg-tint border border-[#D6F2F7] rounded-full px-2 py-0.5 tabular-nums">{shownPairs.length}</span>
+                  </div>
+                  {shownPairs.map(({ pre, post }) => (
+                    <div key={`${pre.title}->${post.title}`} className="rounded-xl border border-line bg-offwhite p-4">
+                      <InjurySignalCard
+                        signal={pre}
+                        linkedPost={[post]}
+                        onPreview={() => openSignalEvidence(pre)}
+                        onInsights={() => openSignalEvidence(pre, "insights")}
+                        onDetails={() => setDetailSignal(pre)}
+                      />
+                      <ConditionConnector relation={post.relationship} />
+                      <InjurySignalCard
+                        signal={post}
+                        onPreview={() => openSignalEvidence(post)}
+                        onInsights={() => openSignalEvidence(post, "insights")}
+                        onDetails={() => setDetailSignal(post)}
+                      />
+                    </div>
+                  ))}
+                </section>
+              )}
+
+              {(condTiming === "all" || condTiming === "pre-incident" || preSignals.length > 0) && (
                 <section className="space-y-4">
                   <div className="flex items-center gap-2.5 pb-3 border-b border-line">
                     <div className="w-8 h-8 rounded-lg bg-tint flex items-center justify-center shrink-0">
@@ -1810,21 +2104,25 @@ export function MedicalTimelineTab({
                         <InjurySignalCard
                           key={s.title}
                           signal={s}
-                          linkedPost={injurySignals.filter((p) => p.relatedCondition === s.title)}
+                          linkedPost={conditionPairs.filter((p) => p.pre === s).map((p) => p.post)}
+                          bodyPartMatches={bodyPartMatches(s)}
                           onPreview={() => openSignalEvidence(s)}
                           onInsights={() => openSignalEvidence(s, "insights")}
+                          onDetails={() => setDetailSignal(s)}
                         />
                       ))}
                     </div>
                   ) : (
                     <div className="rounded-xl border border-dashed border-line bg-white p-5 secondary-text">
-                      No pre-incident conditions are documented in the case record.
+                      {shownPairs.length > 0
+                        ? "Every pre-incident condition is shown above with the post-incident condition it is linked to."
+                        : "No pre-incident conditions are documented in the case record."}
                     </div>
                   )}
                 </section>
               )}
 
-              {condTiming !== "pre-incident" && (
+              {(condTiming === "all" || condTiming === "post-incident" || postSignals.length > 0) && (
                 <section className="space-y-4">
                   <div className="flex items-center gap-2.5 pb-3 border-b border-line">
                     <div className="w-8 h-8 rounded-lg bg-tint flex items-center justify-center shrink-0">
@@ -1839,8 +2137,10 @@ export function MedicalTimelineTab({
                         <InjurySignalCard
                           key={s.title}
                           signal={s}
+                          bodyPartMatches={bodyPartMatches(s)}
                           onPreview={() => openSignalEvidence(s)}
                           onInsights={() => openSignalEvidence(s, "insights")}
+                          onDetails={() => setDetailSignal(s)}
                         />
                       ))}
                     </div>
@@ -1853,7 +2153,7 @@ export function MedicalTimelineTab({
               )}
 
               {/* Signals the record does not place before or after the incident */}
-              {untimedSignals.length > 0 && condTiming === "all" && (
+              {untimedSignals.length > 0 && (
                 <section className="space-y-4">
                   <h3 className="card-title pb-3 border-b border-line">Timing Not Established</h3>
                   <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -1863,6 +2163,7 @@ export function MedicalTimelineTab({
                         signal={s}
                         onPreview={() => openSignalEvidence(s)}
                         onInsights={() => openSignalEvidence(s, "insights")}
+                        onDetails={() => setDetailSignal(s)}
                       />
                     ))}
                   </div>
@@ -2026,10 +2327,13 @@ export function MedicalTimelineTab({
 
       </div>
 
-      {/* LEFT — Filters (top) + Timeline Navigator (below), static while the
-          chronology scrolls. First in the stack on narrow screens. */}
-      <div className="min-w-0 order-1">
-      <div ref={sidebarContentRef} className="space-y-6">
+      {/* LEFT — Medical Practitioner, Filters, Timeline Navigator: static while
+          the chronology scrolls. Only when the three together are taller than
+          the window does the column scroll, as one. First on narrow screens. */}
+      <div className="min-w-0 order-1 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain">
+      <div className="space-y-6">
+
+        <PractitionerSnapshotCard />
 
         {/* Filters — date filter + event-type filter */}
         <div className="rounded-2xl border border-line bg-white p-5 space-y-4">
@@ -2119,6 +2423,11 @@ export function MedicalTimelineTab({
               { value: "all", label: "All Conditions" },
               { value: "pre-incident", label: "Pre-Incident Conditions" },
               { value: "post-incident", label: "Post-Incident Conditions" },
+              { value: "new", label: "New Conditions" },
+              { value: "aggravated", label: "Aggravated Conditions" },
+              { value: "worsened", label: "Worsened Conditions" },
+              { value: "related", label: "Related Conditions" },
+              { value: "unchanged", label: "Unchanged Conditions" },
             ]}
             open={condOpen === "timing"}
             onToggle={() => setCondOpen((o) => (o === "timing" ? null : "timing"))}
@@ -2131,7 +2440,10 @@ export function MedicalTimelineTab({
               { value: "all", label: "All Relationships" },
               { value: "new", label: "New" },
               { value: "aggravated", label: "Aggravated" },
-              { value: "related", label: "Related to Pre-existing" },
+              { value: "worsened", label: "Worsened" },
+              { value: "related", label: "Related" },
+              { value: "unchanged", label: "Unchanged" },
+              { value: "none", label: "Relationship Not Established" },
             ]}
             open={condOpen === "relation"}
             onToggle={() => setCondOpen((o) => (o === "relation" ? null : "relation"))}
@@ -2171,6 +2483,17 @@ export function MedicalTimelineTab({
       </div>
       </div>
     </div>
+
+    {/* Medical Conditions — one condition before and after, and the side-by-side comparison */}
+    {detailSignal && (
+      <ConditionDetailDrawer
+        pre={detailPair?.pre ?? (detailSignal.timing === "pre-incident" ? detailSignal : undefined)}
+        post={detailPair?.post ?? (detailSignal.timing !== "pre-incident" ? detailSignal : undefined)}
+        onClose={() => setDetailSignal(null)}
+        onPreview={(s) => { setDetailSignal(null); openSignalEvidence(s); }}
+      />
+    )}
+    {compareOpen && <ConditionCompareDrawer rows={compareRows} onClose={() => setCompareOpen(false)} />}
 
     {/* Evidence Review Workspace — PDF viewer + AI analysis tools */}
     <EvidenceReviewModal
@@ -3304,13 +3627,7 @@ function DamageEditHistory({ audit }: { audit: DamageAudit[] }) {
 // on one side stays in view while the other side scrolls on its own. The page
 // scrolls inside <main>, not the window, so that is what gets measured. Below
 // the desktop breakpoint it returns null and the stage stacks normally.
-function useWorkspacePanelHeight(
-  ref: React.RefObject<HTMLElement>,
-  minHeight: number,
-  /** The static panel's content. Its height is also a floor, so the static
-   *  side is never cut short when it grows (a filter appearing, say). */
-  staticContentRef?: React.RefObject<HTMLElement>,
-): number | null {
+function useWorkspacePanelHeight(ref: React.RefObject<HTMLElement>, minHeight: number): number | null {
   const [height, setHeight] = useState<number | null>(null);
   useLayoutEffect(() => {
     const el = ref.current;
@@ -3322,16 +3639,14 @@ function useWorkspacePanelHeight(
       // Where the workspace starts within the page, independent of how far
       // the page happens to be scrolled right now.
       const top = el.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
-      const floor = Math.max(minHeight, staticContentRef?.current?.offsetHeight ?? 0);
-      setHeight(Math.max(scroller.clientHeight - top - 24, floor));
+      setHeight(Math.max(scroller.clientHeight - top - 24, minHeight));
     };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(scroller);
-    if (staticContentRef?.current) ro.observe(staticContentRef.current);
     wide.addEventListener("change", measure);
     return () => { ro.disconnect(); wide.removeEventListener("change", measure); };
-  }, [ref, minHeight, staticContentRef]);
+  }, [ref, minHeight]);
   return height;
 }
 

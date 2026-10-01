@@ -116,10 +116,28 @@ export interface AnalysisFinding {
   timing?: "pre-incident" | "post-incident";
   /** Clinical severity, as assessed in the record. */
   severity?: "Mild" | "Moderate" | "Severe" | "Critical";
-  /** How a post-incident condition relates to a pre-existing one. */
-  relationship?: "new" | "aggravated" | "related";
-  /** The pre-existing condition a relationship refers to. */
+  /** The body part or region, with its side where the record gives one
+   *  ("Right leg"). Matching body parts suggest a relationship worth checking;
+   *  they never establish one. */
+  bodyPart?: string;
+  /** How the condition stands across the incident:
+   *  new — appeared after the incident, no documented pre-existing condition;
+   *  aggravated — a pre-existing condition worsened by the incident;
+   *  worsened — the same pre-existing condition became more severe;
+   *  related — related to a pre-existing condition, aggravation not established;
+   *  unchanged — a pre-existing condition continued without documented change. */
+  relationship?: "new" | "aggravated" | "worsened" | "related" | "unchanged";
+  /** What the relationship rests on — a documented fact, a relationship the
+   *  medical evidence supports, or an AI inference not yet verified. */
+  relationshipBasis?: "documented" | "evidence" | "ai";
+  /** For a post-incident condition: the title of the pre-incident condition it
+   *  relates to. This link — not a shared body part — joins the two. */
   relatedCondition?: string;
+  /** What changed after the incident, as the evidence describes it. */
+  changeAfterIncident?: string;
+  symptoms?: string;
+  treatment?: string;
+  functionalImpact?: string;
 }
 
 export function generateAnalysisFindings(categories: ClassificationCategory[]): AnalysisFinding[] {
