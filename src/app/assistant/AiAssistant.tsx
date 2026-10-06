@@ -19,6 +19,7 @@ import {
     Trash2,
     X,
 } from "lucide-react";
+import { FileTypeIcon, FileTypeTag } from "../components/fileType";
 import { useEffect, useRef, useState } from "react";
 import { useChronologyOptional, versionStamp, type ChronVersion } from "../chronology/ChronologyContext";
 import {
@@ -671,8 +672,9 @@ function DocumentPanel({
               }`}>
                 {on && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
               </span>
-              <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+              <FileTypeIcon name={d.name} className="w-3.5 h-3.5 text-deep shrink-0" />
               <span className="mono-ref text-ink truncate">{d.name}</span>
+              <FileTypeTag name={d.name} />
             </button>
           );
         })}

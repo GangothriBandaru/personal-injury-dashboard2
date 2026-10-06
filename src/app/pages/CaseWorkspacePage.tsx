@@ -12,7 +12,7 @@ import { StageEvidenceSection, ViewEvidenceButton } from "../workspace/StageEvid
 import { EvidenceStageTab } from "../workspace/EvidenceStage";
 import { useReportAssistantStage } from "../assistant/AssistantContext";
 import { useChronologyOptional } from "../chronology/ChronologyContext";
-import { useDamagesOptional } from "../damages/DamagesContext";
+import { useWorkspaceModel } from "../workspace/useWorkspaceModel";
 import { DocumentWorkspaceModal } from "../components/DocumentWorkspace";
 import { DemandSpacePage } from "./DemandSpacePage";
 import { DemandPackageEditorPage } from "./DemandPackageEditorPage";
@@ -25,6 +25,13 @@ interface CaseWorkspacePageProps {
   documents?: CaseDocument[];
   onBackToIntake?: () => void;
   onNavigateToValuation?: () => void;
+  /** Stage to open on arrival — used when a Case Ready deliverable links into
+   *  a stage it does not itself show. */
+  initialTab?: string;
+  /** Chronology entries the attorney added by hand, held by the app so the
+   *  Case Ready Medical Chronology shows the same entries. */
+  userChronology?: UserChronology;
+  onUserChronologyChange?: (next: UserChronology) => void;
 }
 
 // The workflow stages, numbered in order. Evidence is not among them: it is a
@@ -69,10 +76,6 @@ const EVIDENCE_ANCHOR: Record<string, string> = {
   negotiation: "negotiations-evidence",
 };
 
-// Canonical valuation baseline (kept consistent with the Valuation stage).
-const BASE_ECONOMIC = 161450;
-const MULTIPLIER = 9;
-
 // Sequential steps shown while the AI drafts the Demand Letter — the only
 // document generated up front. A full package is assembled later, from this.
 const GENERATE_STEPS = [
@@ -85,8 +88,8 @@ const GENERATE_STEPS = [
   "Generating demand letter...",
 ];
 
-export function CaseWorkspacePage({ caseData, analysisFindings = [], documents = [], onBackToIntake, onNavigateToValuation }: CaseWorkspacePageProps) {
-  const [activeTab, setActiveTab] = useState("overview");
+export function CaseWorkspacePage({ caseData, analysisFindings = [], documents = [], onBackToIntake, onNavigateToValuation, initialTab, userChronology: sharedChronology, onUserChronologyChange }: CaseWorkspacePageProps) {
+  const [activeTab, setActiveTab] = useState(initialTab ?? "overview");
 
   // Which Insurance page is open. Entering the stage always lands on the
   // summary; the detailed analysis is one step in from there.
@@ -115,7 +118,13 @@ export function CaseWorkspacePage({ caseData, analysisFindings = [], documents =
   // Chronology entries the attorney added by hand. Held here so they survive
   // tab switches and so the Chronology stage's Evidence section can see the
   // documents attached to them.
-  const [userChronology, setUserChronology] = useState<UserChronology>(EMPTY_USER_CHRONOLOGY);
+  const [localChronology, setLocalChronology] = useState<UserChronology>(EMPTY_USER_CHRONOLOGY);
+  const userChronology = sharedChronology ?? localChronology;
+  const setUserChronology = (update: (prev: UserChronology) => UserChronology) => {
+    const next = update(userChronology);
+    if (onUserChronologyChange) onUserChronologyChange(next);
+    else setLocalChronology(next);
+  };
 
   // ── Stage Evidence — the documents supporting whichever stage is open ──
   const stageId = STAGE_IDS.includes(activeTab as StageId) ? (activeTab as StageId) : null;
@@ -123,7 +132,6 @@ export function CaseWorkspacePage({ caseData, analysisFindings = [], documents =
   // consume chronology evidence, so an approved AI event is immediately usable
   // everywhere the timeline is read.
   const chronoStore = useChronologyOptional();
-  const damages = useDamagesOptional();
   const chronoEvents = [
     ...userChronology.medical,
     ...userChronology.event,
@@ -206,30 +214,8 @@ export function CaseWorkspacePage({ caseData, analysisFindings = [], documents =
     setDemandPackages((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
   };
 
-  // Economic damages are read from the damages store, not from the baseline
-  // constant, so every tab that quotes a total reflects the record as it stands
-  // after an edit — the baseline is only the fallback outside the provider.
-  const economicTotal = damages?.economicTotal ?? BASE_ECONOMIC;
-  const nonEconomicItems = damages?.nonEconomicItemsTotal ?? 0;
-  const nonEconomic = economicTotal * MULTIPLIER + nonEconomicItems;
-  const model: WorkspaceModel = {
-    caseName: caseData?.caseName ?? "Estate of Miller vs Logistics Co.",
-    caseId: caseData?.id ?? caseData?.caseId ?? "CASE-94101",
-    plaintiff: caseData?.plaintiff ?? "Evelyn Miller",
-    defendant: caseData?.defendant ?? "Midwest Logistics Co.",
-    insuranceCarrier: caseData?.insuranceCarrier ?? "ABC Professional Liability Insurance",
-    caseType: caseData?.caseType ?? "Motor Vehicle Accident",
-    jurisdiction: caseData?.jurisdiction ?? "Cook County, IL",
-    incidentDate: caseData?.dateOfIncident ?? "Feb 14, 2026",
-    status: "Ready for Review",
-    recommendedSettlement: economicTotal + nonEconomic,
-    confidence: 94,
-    multiplier: MULTIPLIER,
-    economicTotal,
-    nonEconomicTotal: nonEconomic,
-    estimatedLow: caseData?.estimatedLow ?? 968700,
-    estimatedHigh: caseData?.estimatedHigh ?? 1372325,
-  };
+  // The same case model the Case Ready deliverables read.
+  const model: WorkspaceModel = useWorkspaceModel(caseData);
 
   // The Case Overview carrier tile opens the Insurance stage.
   const tabProps = { model, findings: analysisFindings, documents, goTo: openTab, goToValuation: onNavigateToValuation, onGenerateDemand: startGenerateDemand, onOpenInsurance: () => openInsurance() };

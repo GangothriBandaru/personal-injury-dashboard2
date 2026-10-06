@@ -2,9 +2,12 @@ import React, { useState, useEffect } from "react";
 import {
   Eye, Sparkles, Download, FileText, ListChecks, Info, CheckCircle,
   Bot, Send, ChevronLeft, ChevronRight, ChevronDown, ZoomIn, ZoomOut, X, Search,
+  Play, Pause, Clock,
 } from "lucide-react";
 import { useNotes } from "../notes/NotesContext";
 import { getDocumentContent, type DocBlock } from "./documentText";
+import { fileKind, FileTypeIcon, FileTypeTag, FILE_KIND_LABEL, type FileKind } from "./fileType";
+import { EVIDENCE_INTEL } from "../workspace/evidenceData";
 
 /* ────────────────────────────────────────────────────────────────────────────
    Standardized document actions.
@@ -60,8 +63,54 @@ export function DocActions({
 
 // Simulated document intelligence — in production this reflects real extraction.
 // Insights are computed across ALL supporting documents in the set, not just one.
-function buildDocInsights(docs: any[]) {
+type DocInsights = {
+  summary: string;
+  keyPoints: string[];
+  entities: { label: string; value: string }[];
+  supportingDocs: string[];
+  confidence: { level: string; score: number };
+  /** Images: what is visible. Video / audio: the important moments. */
+  observations?: string[];
+  moments?: { time: string; text: string }[];
+};
+
+// Images, video and audio have no document text, so their insights come from
+// the analysis the case already holds for that file — what an image shows,
+// the moments in a recording. Media with no analysis on file says so rather
+// than borrowing a document's findings.
+function buildMediaInsights(docs: any[], kind: Exclude<FileKind, "document">): DocInsights {
   const primary = docs[0] ?? {};
+  const name = String(primary.name ?? "");
+  const intel = EVIDENCE_INTEL[name.toLowerCase()];
+  const entities = [
+    { label: "Type", value: FILE_KIND_LABEL[kind] },
+    ...(primary.source ? [{ label: "Source", value: String(primary.source) }] : []),
+    ...(primary.date ? [{ label: "Date", value: String(primary.date) }] : []),
+  ];
+  if (!intel) {
+    return {
+      summary: `This ${FILE_KIND_LABEL[kind].toLowerCase()} has not been through detailed analysis yet, so no findings are shown for it.`,
+      keyPoints: [],
+      entities,
+      supportingDocs: docs.map((d) => d.name),
+      confidence: { level: "Not analysed", score: 0 },
+    };
+  }
+  return {
+    summary: intel.summary,
+    keyPoints: intel.keyFacts.map((f) => f.text),
+    entities,
+    supportingDocs: docs.map((d) => d.name),
+    confidence: intel.confidence,
+    observations: intel.observations,
+    moments: intel.moments,
+  };
+}
+
+function buildDocInsights(docs: any[]): DocInsights {
+  const primary = docs[0] ?? {};
+  const kind = fileKind(String(primary.name ?? ""));
+  if (kind !== "document") return buildMediaInsights(docs, kind);
   return {
     summary: "Spinal MRI confirms a herniated L4-L5 disc consistent with the claimed injury.",
     keyPoints: [
@@ -95,7 +144,7 @@ function InsightBlock({ icon: Icon, title, children }: { icon: any; title: strin
    interface in place — the PDF viewer on the left stays visible throughout.
    When `onBackToPreview` is provided, a back control returns to the document-only
    Preview layout (80% viewer / 20% action rail). */
-function AiIntelligencePanel({ docs, onDownload, startInChat = false, onBackToPreview, insights: insightsOverride }: { docs: any[]; onDownload?: () => void; startInChat?: boolean; onBackToPreview?: () => void; insights?: ReturnType<typeof buildDocInsights> }) {
+function AiIntelligencePanel({ docs, onDownload, startInChat = false, onBackToPreview, insights: insightsOverride }: { docs: any[]; onDownload?: () => void; startInChat?: boolean; onBackToPreview?: () => void; insights?: DocInsights }) {
   const [chatOpen, setChatOpen] = useState(startInChat);
   const [messages, setMessages] = useState<Array<{ role: string; content: string }>>([]);
   const [input, setInput] = useState("");
@@ -189,8 +238,8 @@ function AiIntelligencePanel({ docs, onDownload, startInChat = false, onBackToPr
           <Sparkles className="w-4 h-4 text-deep" strokeWidth={1.75} />
           <span className="text-sm font-semibold text-ink">AI Insights</span>
         </div>
-        <span className={`pill ${insights.confidence.score >= 80 ? "pill-complete" : "pill-progress"}`}>
-          {insights.confidence.level} · {insights.confidence.score}%
+        <span className={`pill ${insights.confidence.score >= 80 ? "pill-complete" : insights.confidence.score > 0 ? "pill-progress" : "pill-neutral"}`}>
+          {insights.confidence.score > 0 ? `${insights.confidence.level} · ${insights.confidence.score}%` : insights.confidence.level}
         </span>
       </div>
 
@@ -200,16 +249,44 @@ function AiIntelligencePanel({ docs, onDownload, startInChat = false, onBackToPr
           <p className="text-sm text-ink leading-relaxed">{insights.summary}</p>
         </InsightBlock>
 
-        <InsightBlock icon={ListChecks} title="Key Points">
-          <ul className="space-y-1.5">
-            {insights.keyPoints.map((f, i) => (
-              <li key={i} className="flex items-start gap-2 text-sm text-ink leading-relaxed">
-                <CheckCircle className="w-3.5 h-3.5 text-green-600 mt-0.5 shrink-0" strokeWidth={1.75} />
-                <span>{f}</span>
-              </li>
-            ))}
-          </ul>
-        </InsightBlock>
+        {insights.observations && insights.observations.length > 0 && (
+          <InsightBlock icon={Eye} title="What the Image Shows">
+            <ul className="space-y-1.5">
+              {insights.observations.map((o, i) => (
+                <li key={i} className="flex items-start gap-2 text-sm text-ink leading-relaxed">
+                  <CheckCircle className="w-3.5 h-3.5 text-green-600 mt-0.5 shrink-0" strokeWidth={1.75} />
+                  <span>{o}</span>
+                </li>
+              ))}
+            </ul>
+          </InsightBlock>
+        )}
+
+        {insights.moments && insights.moments.length > 0 && (
+          <InsightBlock icon={Clock} title="Important Moments">
+            <ul className="space-y-1.5">
+              {insights.moments.map((m) => (
+                <li key={m.time} className="flex items-start gap-2 text-sm text-ink leading-relaxed">
+                  <span className="mono-ref shrink-0 mt-px">{m.time}</span>
+                  <span>{m.text}</span>
+                </li>
+              ))}
+            </ul>
+          </InsightBlock>
+        )}
+
+        {insights.keyPoints.length > 0 && (
+          <InsightBlock icon={ListChecks} title="Key Points">
+            <ul className="space-y-1.5">
+              {insights.keyPoints.map((f, i) => (
+                <li key={i} className="flex items-start gap-2 text-sm text-ink leading-relaxed">
+                  <CheckCircle className="w-3.5 h-3.5 text-green-600 mt-0.5 shrink-0" strokeWidth={1.75} />
+                  <span>{f}</span>
+                </li>
+              ))}
+            </ul>
+          </InsightBlock>
+        )}
 
         <InsightBlock icon={Info} title="Key Details">
           <div className="flex flex-wrap gap-2">
@@ -225,9 +302,10 @@ function AiIntelligencePanel({ docs, onDownload, startInChat = false, onBackToPr
         <InsightBlock icon={FileText} title="Supporting Documents">
           <ul className="space-y-1.5">
             {insights.supportingDocs.map((d) => (
-              <li key={d} className="flex items-center gap-2 text-sm text-ink">
-                <FileText className="w-3.5 h-3.5 text-[#5B6B78] shrink-0" strokeWidth={1.75} />
+              <li key={d} className="flex items-center gap-2 text-sm text-ink min-w-0">
+                <FileTypeIcon name={d} className="w-3.5 h-3.5 text-[#5B6B78] shrink-0" />
                 <span className="font-mono text-xs truncate">{d}</span>
+                <FileTypeTag name={d} className="ml-auto" />
               </li>
             ))}
           </ul>
@@ -315,7 +393,7 @@ function DocumentContextPanel({
         <div>
           <div className="eyebrow mb-2">Documents</div>
           <div className="flex items-center gap-2 rounded-lg border border-brand bg-tint px-3 py-2">
-            <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+            <FileTypeIcon name={String(activeDoc?.name ?? "")} />
             <span className="text-xs font-medium text-deep truncate">{activeDoc?.name}</span>
           </div>
           {others.length > 0 && (
@@ -336,7 +414,7 @@ function DocumentContextPanel({
                         onClick={() => onSelectDoc(i)}
                         className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-line bg-white text-left hover:bg-wash transition-colors"
                       >
-                        <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+                        <FileTypeIcon name={d.name} />
                         <span className="text-xs text-ink truncate">{d.name}</span>
                       </button>
                     )
@@ -428,6 +506,106 @@ function DocumentPage({ doc }: { doc: any }) {
   );
 }
 
+/* Images, video and audio open in a viewer for their kind rather than on a
+   document page. The prototype bundles no media files, so each shows a frame
+   for the file with the case's own analysis of it — what an image shows, the
+   moments in a recording — beneath. */
+function MediaPage({ doc, kind, zoom }: { doc: any; kind: Exclude<FileKind, "document">; zoom: number }) {
+  const name = String(doc?.name ?? "");
+  const intel = EVIDENCE_INTEL[name.toLowerCase()];
+  const moments = intel?.moments ?? [];
+  const [playing, setPlaying] = useState(false);
+  const [at, setAt] = useState(0);
+  return (
+    <div className="flex-1 overflow-auto bg-track flex justify-center items-start p-8">
+      <div className="w-full max-w-2xl space-y-4">
+        {kind === "image" && (
+          <div style={{ transform: `scale(${zoom / 100})`, transformOrigin: "top center" }} className="transition-transform duration-200">
+            <div className="bg-white rounded-xl shadow-sm border border-line aspect-[4/3] flex flex-col items-center justify-center gap-3">
+              <FileTypeIcon name={name} className="w-12 h-12 text-[#9BDAEC]" />
+              <p className="text-xs text-[#5B6B78] font-mono">{name}</p>
+            </div>
+          </div>
+        )}
+        {kind === "video" && (
+          <div className="bg-ink rounded-xl aspect-video flex flex-col items-center justify-center gap-3">
+            <FileTypeIcon name={name} className="w-12 h-12 text-soft" />
+            <p className="text-xs text-soft font-mono">{name}</p>
+            {moments[at] && <p className="text-sm text-white px-6 text-center">{moments[at].time} · {moments[at].text}</p>}
+          </div>
+        )}
+        {kind === "audio" && (
+          <div className="bg-white rounded-xl shadow-sm border border-line p-8 flex flex-col items-center justify-center gap-3">
+            <FileTypeIcon name={name} className="w-12 h-12 text-[#9BDAEC]" />
+            <p className="text-xs text-[#5B6B78] font-mono">{name}</p>
+            {moments[at] && <p className="text-sm text-ink px-6 text-center">{moments[at].time} · {moments[at].text}</p>}
+          </div>
+        )}
+
+        {/* Playback — video and audio */}
+        {kind !== "image" && (
+          <div className="flex items-center gap-3 rounded-xl border border-line bg-white px-4 py-3">
+            <button
+              onClick={() => setPlaying((p) => !p)}
+              aria-label={playing ? "Pause" : "Play"}
+              className="w-9 h-9 rounded-full bg-brand hover:bg-deep text-white flex items-center justify-center transition-colors shrink-0"
+            >
+              {playing ? <Pause className="w-4 h-4" strokeWidth={2} /> : <Play className="w-4 h-4" strokeWidth={2} />}
+            </button>
+            <input
+              type="range"
+              min={0}
+              max={Math.max(0, moments.length - 1)}
+              value={at}
+              onChange={(e) => setAt(Number(e.target.value))}
+              className="flex-1 accent-[#3FB5D7]"
+              aria-label="Position"
+            />
+            <span className="mono-ref shrink-0">{moments[at]?.time ?? "00:00"}</span>
+          </div>
+        )}
+
+        {/* The case's own analysis of this file */}
+        {kind === "image" && intel?.observations && (
+          <div className="rounded-xl border border-line bg-white p-4">
+            <div className="eyebrow mb-2">What the image shows</div>
+            <ul className="space-y-1.5">
+              {intel.observations.map((o) => (
+                <li key={o} className="flex items-start gap-2">
+                  <CheckCircle className="w-4 h-4 text-deep mt-0.5 shrink-0" strokeWidth={1.75} />
+                  <span className="body-text leading-relaxed">{o}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {kind !== "image" && moments.length > 0 && (
+          <div className="rounded-xl border border-line bg-white p-4">
+            <div className="eyebrow mb-2">Important Moments</div>
+            <div className="space-y-1.5">
+              {moments.map((m, i) => (
+                <button
+                  key={m.time}
+                  onClick={() => setAt(i)}
+                  className={`w-full text-left rounded-lg border px-3 py-2 transition-all ${
+                    i === at ? "border-brand bg-tint" : "border-line bg-offwhite hover:border-soft hover:bg-wash"
+                  }`}
+                >
+                  <span className="mono-ref mr-2">{m.time}</span>
+                  <span className="body-text">{m.text}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {!intel && (
+          <p className="secondary-text text-center">This {FILE_KIND_LABEL[kind].toLowerCase()} has not been through detailed analysis yet.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* The unified Document Workspace modal — split layout that depends on the view:
    • Preview  → Left (80%) document viewer · Right (20%) action rail (Insights / Chat / Download)
    • Insights → Left (60%) document viewer · Right (40%) AI Intelligence panel
@@ -450,7 +628,7 @@ export function DocumentWorkspaceModal(props: {
   position?: number; // 1-based index of the current item
   total?: number;    // total navigable items (signals/rows)
   noteContext?: { contextType: string; reference: string }; // auto-attached to notes
-  insights?: ReturnType<typeof buildDocInsights>; // override the AI Insights content
+  insights?: DocInsights; // override the AI Insights content
   contextPanel?: DocContextPanel; // when set, the preview rail shows category context
 }) {
   if (!props.docs || props.docs.length === 0) return null;
@@ -481,7 +659,7 @@ function WorkspaceInner({
   position?: number;
   total?: number;
   noteContext?: { contextType: string; reference: string };
-  insights?: ReturnType<typeof buildDocInsights>;
+  insights?: DocInsights;
   contextPanel?: DocContextPanel;
 }) {
   const [activeTab, setActiveTab] = useState(0);
@@ -494,6 +672,8 @@ function WorkspaceInner({
   const [view, setView] = useState<"preview" | "insights" | "chat">(initialView);
   const isPreview = view === "preview";
   const activeDoc = docs[activeTab] ?? docs[0];
+  const activeKind = fileKind(String(activeDoc?.name ?? ""));
+  const [zoom, setZoom] = useState(100);
 
   // Register evidence/document context so a note taken from here auto-attaches it.
   const { setDocContext } = useNotes();
@@ -513,7 +693,10 @@ function WorkspaceInner({
         {/* Header */}
         <div className="flex items-center justify-between gap-4 px-6 py-4 border-b border-line shrink-0">
           <div className="min-w-0">
-            <h2 className="text-base font-semibold text-ink font-mono truncate">{activeDoc.name}</h2>
+            <div className="flex items-center gap-2 min-w-0">
+              <h2 className="text-base font-semibold text-ink font-mono truncate">{activeDoc.name}</h2>
+              <FileTypeTag name={String(activeDoc.name ?? "")} icon />
+            </div>
             {subtitle && <p className="text-xs text-[#5B6B78]">{subtitle}</p>}
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -574,7 +757,7 @@ function WorkspaceInner({
                               : "bg-white border-line text-[#5B6B78] hover:border-soft hover:text-ink"
                           }`}
                         >
-                          <FileText className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
+                          <FileTypeIcon name={d.name} className="w-3.5 h-3.5 shrink-0" />
                           <span className="max-w-[180px] truncate">{d.name}</span>
                         </button>
                       );
@@ -618,7 +801,7 @@ function WorkspaceInner({
                                 idx === activeTab ? "bg-tint text-deep" : "text-ink hover:bg-wash"
                               }`}
                             >
-                              <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+                              <FileTypeIcon name={d.name} />
                               <span className="truncate">{d.name}</span>
                             </button>
                           ))}
@@ -635,19 +818,29 @@ function WorkspaceInner({
 
             {/* Viewer toolbar */}
             <div className="flex items-center gap-3 px-4 py-2.5 border-b border-line bg-wash shrink-0">
-              <button className="p-1.5 hover:bg-tint rounded-lg transition-colors"><ZoomOut className="w-4 h-4 text-[#5B6B78]" strokeWidth={1.75} /></button>
-              <span className="text-xs text-[#5B6B78]">100%</span>
-              <button className="p-1.5 hover:bg-tint rounded-lg transition-colors"><ZoomIn className="w-4 h-4 text-[#5B6B78]" strokeWidth={1.75} /></button>
+              {activeKind === "document" || activeKind === "image" ? (
+                <>
+                  <button onClick={() => setZoom((z) => Math.max(50, z - 25))} className="p-1.5 hover:bg-tint rounded-lg transition-colors"><ZoomOut className="w-4 h-4 text-[#5B6B78]" strokeWidth={1.75} /></button>
+                  <span className="text-xs text-[#5B6B78] tabular-nums">{activeKind === "image" ? zoom : 100}%</span>
+                  <button onClick={() => setZoom((z) => Math.min(200, z + 25))} className="p-1.5 hover:bg-tint rounded-lg transition-colors"><ZoomIn className="w-4 h-4 text-[#5B6B78]" strokeWidth={1.75} /></button>
+                </>
+              ) : (
+                <span className="text-xs font-medium text-[#5B6B78]">{FILE_KIND_LABEL[activeKind]} preview</span>
+              )}
               <div className="flex-1" />
-              <div className="flex items-center gap-2 text-xs text-[#5B6B78]">
-                <button className="p-1.5 hover:bg-tint rounded-lg transition-colors"><ChevronLeft className="w-4 h-4" strokeWidth={1.75} /></button>
-                <span>Page 1 of 1</span>
-                <button className="p-1.5 hover:bg-tint rounded-lg transition-colors"><ChevronRight className="w-4 h-4" strokeWidth={1.75} /></button>
-              </div>
+              {activeKind === "document" && (
+                <div className="flex items-center gap-2 text-xs text-[#5B6B78]">
+                  <button className="p-1.5 hover:bg-tint rounded-lg transition-colors"><ChevronLeft className="w-4 h-4" strokeWidth={1.75} /></button>
+                  <span>Page 1 of 1</span>
+                  <button className="p-1.5 hover:bg-tint rounded-lg transition-colors"><ChevronRight className="w-4 h-4" strokeWidth={1.75} /></button>
+                </div>
+              )}
             </div>
 
             {/* Viewer area — renders the actual document text for the active tab */}
-            <DocumentPage doc={activeDoc} />
+            {activeKind === "document"
+              ? <DocumentPage doc={activeDoc} />
+              : <MediaPage key={String(activeDoc?.name)} doc={activeDoc} kind={activeKind} zoom={zoom} />}
           </div>
 
           {/* Right — Preview shows the action rail (or a Document Context Panel

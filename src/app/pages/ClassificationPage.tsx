@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { FileTypeIcon, FileTypeTag } from "../components/fileType";
 import { StageNavigator } from "../components/StageNavigator";
 import { CheckCircle, ChevronRight, ArrowRight, AlertCircle, ChevronLeft, FileText, Eye } from "lucide-react";
 import { Button } from "../components/ui/button";
@@ -231,8 +232,9 @@ export function ClassificationPage({ caseData, documents = [], onStageClick, onB
                               {category.docs.map((file) => (
                                 <li key={file.id} className="lg-row flex items-center justify-between px-3 py-2 rounded-lg transition-colors group">
                                   <div className="flex items-center gap-2 flex-1">
-                                    <FileText className="w-4 h-4 text-[#5B6B78]" strokeWidth={1.75} />
+                                    <FileTypeIcon name={file.name} className="w-4 h-4 text-[#5B6B78]" />
                                     <span className="text-sm text-ink">{file.name}</span>
+                                    <FileTypeTag name={file.name} />
                                     <span className="mono-ref">({file.date})</span>
                                   </div>
                                   <button

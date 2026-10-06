@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { FileTypeIcon, FileTypeTag } from "../components/fileType";
 import { StageNavigator } from "../components/StageNavigator";
 import { ChevronLeft, ChevronRight, CheckCircle, ArrowRight, DollarSign, Shield, AlertCircle, Sparkles, ChevronDown, FileText, Eye, X, ChevronUp } from "lucide-react";
 import { Button } from "../components/ui/button";
@@ -1195,8 +1196,9 @@ export function ValuationPage({ caseData, analysisFindings = [], onStageClick, o
                       <button onClick={() => toggleDocRow(doc.name)} className="w-full text-left px-3 py-2.5 hover:bg-wash transition-colors">
                         <div className="eyebrow text-[#8A98A3] mb-1.5">Document {String(i + 1).padStart(2, "0")}</div>
                         <div className="flex items-center gap-2">
-                          <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+                          <FileTypeIcon name={doc.name} className="w-3.5 h-3.5 text-deep shrink-0" />
                           <span className="text-xs font-medium text-ink truncate flex-1">{doc.name}</span>
+                          <FileTypeTag name={doc.name} />
                           <span className="text-xs font-semibold text-ink tabular-nums shrink-0">{formatCurrency(doc.amount)}</span>
                           <ChevronDown className={`w-3.5 h-3.5 text-deep shrink-0 transition-transform ${open ? "rotate-180" : ""}`} strokeWidth={1.75} />
                         </div>

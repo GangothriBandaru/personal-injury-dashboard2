@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { FileTypeIcon, FileTypeTag } from "../components/fileType";
 import {
   X, Plus, Calendar, ChevronLeft, ChevronRight, ChevronDown, FileText, AlertTriangle, Trash2, Sparkles, RotateCcw,
 } from "lucide-react";
@@ -314,8 +315,9 @@ function EvidencePicker({
       <div className="flex flex-wrap items-center gap-2">
         {selected.map((name) => (
           <span key={name} className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-offwhite px-3 py-2 text-sm text-ink">
-            <FileText className="w-4 h-4 text-deep shrink-0" strokeWidth={1.75} />
+            <FileTypeIcon name={name} className="w-4 h-4 text-deep shrink-0" />
             <span className="truncate max-w-[200px]">{name}</span>
+            <FileTypeTag name={name} />
             <button
               type="button"
               onClick={() => onChange(selected.filter((n) => n !== name))}
@@ -349,8 +351,9 @@ function EvidencePicker({
                     onClick={() => { onChange([...selected, d]); setOpen(false); }}
                     className="w-full flex items-center gap-2 text-left px-3 py-2 rounded-md text-sm text-ink hover:bg-wash transition-colors"
                   >
-                    <FileText className="w-4 h-4 text-deep shrink-0" strokeWidth={1.75} />
+                    <FileTypeIcon name={d} className="w-4 h-4 text-deep shrink-0" />
                     <span className="truncate">{d}</span>
+                    <FileTypeTag name={d} />
                   </button>
                 ))}
               </div>

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, ReactNode } from "react";
+import { FileTypeIcon, FileTypeTag } from "../components/fileType";
 import {
   Scale, MapPin, CheckCircle, ShieldCheck, User, Building2, Hash, Calendar, AlertTriangle, X,
   FileText, Activity, Stethoscope, DollarSign, Sparkles,
@@ -1227,7 +1228,7 @@ function ChangeHistoryDrawer({ ev, onClose }: { ev: ChronEvent; onClose: () => v
                           <div className="flex flex-wrap gap-1.5">
                             {v.sources.map((d) => (
                               <span key={d} className="inline-flex items-center gap-1.5 rounded-md border border-line bg-offwhite px-2.5 py-1 text-xs text-ink">
-                                <FileText className="w-3.5 h-3.5 text-deep" strokeWidth={1.75} /> {d}
+                                <FileTypeIcon name={d} className="w-3.5 h-3.5 text-deep" /> {d} <FileTypeTag name={d} />
                               </span>
                             ))}
                           </div>
@@ -1264,8 +1265,9 @@ function EvidenceChips({ evidence, onOpen, align }: { evidence: string[]; onOpen
         title="Open evidence review"
         className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-offwhite px-3 py-2 text-sm text-ink cursor-pointer hover:border-brand hover:bg-tint hover:shadow-sm transition-all"
       >
-        <FileText className="w-4 h-4 text-deep shrink-0" strokeWidth={1.75} />
+        <FileTypeIcon name={evidence[0]} className="w-4 h-4 text-deep shrink-0" />
         <span className="truncate max-w-[220px]">{evidence[0]}</span>
+        <FileTypeTag name={evidence[0]} />
       </button>
       {evidence.length > 1 && (
         <button
@@ -1517,8 +1519,9 @@ function InjurySignalCard({
                 onClick={onPreview}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-offwhite px-2.5 py-1.5 text-xs text-ink hover:border-brand hover:bg-tint transition-all"
               >
-                <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+                <FileTypeIcon name={f} className="w-3.5 h-3.5 text-deep shrink-0" />
                 <span className="truncate max-w-[200px]">{f}</span>
+                <FileTypeTag name={f} />
               </button>
             ))}
           </div>
@@ -1630,8 +1633,9 @@ function ConditionDetailDrawer({
                   onClick={() => onPreview(s)}
                   className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-offwhite px-2.5 py-1.5 text-xs text-ink hover:border-brand hover:bg-tint transition-all"
                 >
-                  <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+                  <FileTypeIcon name={e.file} className="w-3.5 h-3.5 text-deep shrink-0" />
                   {e.file}
+                  <FileTypeTag name={e.file} />
                 </button>
               ))}
             </div>
@@ -1642,12 +1646,35 @@ function ConditionDetailDrawer({
   );
 }
 
-// Pre-incident condition → incident / change → post-incident condition, for
-// every pre-incident condition on record, then the post-incident conditions
-// the record links to none of them.
-function ConditionCompareDrawer({
-  rows, unlinkedPost, onClose,
-}: { rows: { pre: AnalysisFinding; post?: AnalysisFinding }[]; unlinkedPost: AnalysisFinding[]; onClose: () => void }) {
+// An attorney's reading of one pre/post pair, built only from what the record
+// states — the conditions, the recorded relationship and its basis. It frames
+// what to evaluate; it never asserts causation, coverage or recovery.
+function compareInsight(pre: AnalysisFinding, post: AnalysisFinding | undefined, relation: ConditionRelation | undefined, sameBody: boolean) {
+  const basis = (post?.relationshipBasis ?? pre.relationshipBasis);
+  const basisNote = basis ? ` (${CONDITION_BASIS_LABEL[basis]}.)` : "";
+  const body = sameBody && pre.bodyPart ? `, affecting the same body part (${pre.bodyPart.toLowerCase()})` : "";
+  if (relation === "unchanged") {
+    return `${pre.title} is recorded as continuing after the incident without documented material change.${basisNote}`;
+  }
+  if (!post || !relation) {
+    return `The record documents ${pre.title} before the incident but does not establish how it relates to a post-incident condition. Review the medical evidence before treating any post-incident condition as new or as an aggravation.`;
+  }
+  if (relation === "aggravated" || relation === "worsened") {
+    return `The record documents ${pre.title} before the incident and ${post.title} after it${body}. The relationship is recorded as ${CONDITION_RELATION_MEANING[relation].toLowerCase()}, so the post-incident condition should be evaluated as a potential aggravation of a pre-existing condition rather than an entirely new injury.${basisNote}`;
+  }
+  if (relation === "related") {
+    return `The record documents ${pre.title} before the incident and ${post.title} after it${body}. It records the two as related but does not establish aggravation — weigh the pre-existing condition when evaluating the post-incident one.${basisNote}`;
+  }
+  return `${post.title} is recorded as a new injury after the incident, with no documented pre-existing condition corresponding to it.${basisNote}`;
+}
+
+// The Compare sub-tab: every pre-incident condition, then what became of it
+// after the incident, then the relationship and an attorney insight. With no
+// pre-incident condition on record it says so, and lists the post-incident
+// findings rather than a comparison that would mislead.
+function ConditionCompareView({
+  rows, unlinkedPost, onReviewPost,
+}: { rows: { pre: AnalysisFinding; post?: AnalysisFinding }[]; unlinkedPost: AnalysisFinding[]; onReviewPost: () => void }) {
   const fields: { label: string; get: (s: AnalysisFinding) => string | undefined }[] = [
     { label: "Body Part", get: (s) => s.bodyPart },
     { label: "Severity", get: (s) => s.severity },
@@ -1655,63 +1682,63 @@ function ConditionCompareDrawer({
     { label: "Treatment", get: (s) => s.treatment },
     { label: "Functional Impact", get: (s) => s.functionalImpact },
   ];
-  const step = (label: string, s?: AnalysisFinding, empty?: string) => (
-    <div className="rounded-xl border border-line bg-offwhite p-3">
+  const step = (label: string, s?: AnalysisFinding, note?: string, empty?: string) => (
+    <div className="rounded-xl border border-line bg-offwhite p-4">
       <div className="eyebrow mb-1">{label}</div>
       {s ? (
         <>
-          <div className="text-sm font-semibold text-ink leading-snug">{s.title}</div>
-          <div className="text-xs text-[#5B6B78] mt-0.5">Severity: {s.severity ?? "Not assessed"}</div>
+          <div className="card-title leading-snug">{s.title}</div>
+          {note && <div className="secondary-text mt-0.5">{note}</div>}
+          <div className="text-xs text-[#5B6B78] mt-1">Severity: {s.severity ?? "Not assessed"}</div>
         </>
       ) : <div className="text-sm text-[#8A98A3]">{empty}</div>}
     </div>
   );
+  const arrow = (
+    <div className="flex justify-center py-1.5" aria-hidden="true">
+      <ArrowDown className="w-4 h-4 text-deep" strokeWidth={1.75} />
+    </div>
+  );
   return (
-    <ConditionDrawer eyebrow="Medical Conditions" title="Compare Pre & Post-Incident" onClose={onClose}>
+    <div className="space-y-4">
       {rows.length === 0 && (
-        <div className="rounded-xl border border-dashed border-line bg-white p-5 secondary-text">
-          No pre-incident condition is documented in the case record, so there is nothing to compare across the
-          incident yet.
+        <div className="rounded-xl border border-dashed border-line bg-white p-5">
+          <p className="secondary-text">No pre-incident conditions are currently documented.</p>
+          <p className="secondary-text">Post-incident findings can still be reviewed below.</p>
         </div>
       )}
 
       {rows.map(({ pre, post }) => {
         const relation = post?.relationship ?? (pre.relationship === "unchanged" ? "unchanged" : undefined);
-        const basis = post?.relationshipBasis ?? pre.relationshipBasis;
+        const sameBody = !!post && sameBodyPart(pre.bodyPart, post.bodyPart);
         return (
-          <section key={pre.title} className="rounded-xl border border-line bg-white p-4">
-            {/* Before → incident / change → after */}
-            {step("Pre-Incident Condition", pre)}
-            <div className="flex flex-col items-center py-1.5">
-              <div className="w-px h-3 bg-soft" />
-              <div className="rounded-lg bg-tint border border-[#D6F2F7] px-3 py-2 text-center max-w-full">
-                <div className="eyebrow text-deep">Incident / Change</div>
-                <div className="text-sm text-ink mt-0.5">
-                  {post?.changeAfterIncident ?? <span className="text-[#8A98A3]">Change not described in the record</span>}
-                </div>
-              </div>
-              <div className="w-px h-3 bg-soft" />
-              <ArrowDown className="w-4 h-4 text-deep -mt-1" strokeWidth={1.75} />
-            </div>
+          <section key={pre.title} className="rounded-xl border border-line bg-white p-5">
+            {step("Pre-Incident", pre, "Existing condition documented before incident")}
+            {arrow}
             {step(
-              "Post-Incident Condition",
+              "Post-Incident",
               post,
+              post?.changeAfterIncident,
               relation === "unchanged" ? CONDITION_RELATION_MEANING.unchanged : "No post-incident condition is linked to it",
             )}
-
-            <div className="mt-3 rounded-lg bg-tint border border-[#D6F2F7] p-3 flex items-center gap-2 flex-wrap">
-              <span className="eyebrow">Relationship</span>
-              {relation ? (
-                <>
-                  <ConditionRelationTag relation={relation} />
-                  <span className="text-sm font-medium text-ink">{CONDITION_RELATION_MEANING[relation]}</span>
-                  {basis && <span className="text-xs text-[#5B6B78]">({CONDITION_BASIS_LABEL[basis]})</span>}
-                </>
-              ) : <span className="text-sm text-[#8A98A3]">{RELATIONSHIP_NOT_ESTABLISHED}</span>}
+            {arrow}
+            {/* Relationship / change */}
+            <div className="rounded-xl bg-tint border border-[#D6F2F7] p-4 space-y-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="eyebrow">Relationship</span>
+                {relation
+                  ? <><ConditionRelationTag relation={relation} /><span className="text-sm font-medium text-ink">{CONDITION_RELATION_MEANING[relation]}</span></>
+                  : <span className="text-sm text-[#8A98A3]">No relationship established</span>}
+                {sameBody && <span className="pill pill-neutral uppercase tracking-[0.06em]">Same body part</span>}
+              </div>
+              <div>
+                <div className="eyebrow text-deep mb-0.5">Attorney Insight</div>
+                <p className="body-text leading-relaxed">{compareInsight(pre, post, relation, sameBody)}</p>
+              </div>
             </div>
 
             {/* Side by side, field by field */}
-            <div className="grid grid-cols-2 gap-x-4 mt-3">
+            <div className="grid grid-cols-2 gap-x-4 mt-4">
               <div className="eyebrow pb-2 border-b border-line">Pre-Incident</div>
               <div className="eyebrow pb-2 border-b border-line">Post-Incident</div>
               {fields.map((f) => (
@@ -1735,24 +1762,28 @@ function ConditionCompareDrawer({
         );
       })}
 
-      {/* Post-incident conditions with no pre-incident condition linked: a new
-          injury where the record says so, otherwise not established. */}
+      {/* Post-incident findings with no pre-incident condition linked */}
       {unlinkedPost.length > 0 && (
-        <section className="rounded-xl border border-line bg-white p-4">
-          <div className="eyebrow mb-1">Post-Incident Conditions With No Linked Pre-Incident Condition</div>
+        <section className="rounded-xl border border-line bg-white p-5">
+          <div className="flex items-center justify-between gap-3 flex-wrap mb-1">
+            <div className="eyebrow">Post-Incident Findings With No Linked Pre-Incident Condition</div>
+            <button onClick={onReviewPost} className="inline-flex items-center gap-1 text-sm font-semibold text-deep hover:text-ink transition-colors">
+              Review post-incident findings <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
+            </button>
+          </div>
           <div className="divide-y divide-line">
             {unlinkedPost.map((p) => (
               <div key={p.title} className="py-2.5 flex items-center justify-between gap-3 flex-wrap">
                 <span className="text-sm font-medium text-ink">{p.title}</span>
                 {p.relationship
                   ? <span className="flex items-center gap-2"><ConditionRelationTag relation={p.relationship} /><span className="text-xs text-[#5B6B78]">{CONDITION_RELATION_MEANING[p.relationship]}</span></span>
-                  : <span className="text-xs text-[#8A98A3]">{RELATIONSHIP_NOT_ESTABLISHED}</span>}
+                  : <span className="text-xs text-[#8A98A3]">No relationship established</span>}
               </div>
             ))}
           </div>
         </section>
       )}
-    </ConditionDrawer>
+    </div>
   );
 }
 
@@ -1879,7 +1910,6 @@ export function MedicalTimelineTab({
   const preSignals = shownSignals.filter((s) => s.timing === "pre-incident");
   const postSignals = shownSignals.filter((s) => s.timing === "post-incident");
   const untimedSignals = shownSignals.filter((s) => !s.timing);
-  const visibleConditions = shownSignals.length;
   // Each section previews three conditions, as the Analysis stage's Injury
   // Signals do, and expands on its own.
   const CONDITION_PREVIEW = 3;
@@ -1896,7 +1926,14 @@ export function MedicalTimelineTab({
   };
   // Every pre-incident condition beside what became of it, for the comparison.
   const compareRows = allPre.map((pre) => ({ pre, post: conditionPairs.find((p) => p.pre === pre)?.post }));
-  const [compareOpen, setCompareOpen] = useState(false);
+  // Which Medical Conditions sub-tab is open. A case with pre-incident conditions
+  // opens on them; one without opens on the post-incident findings.
+  const [condView, setCondView] = useState<"pre" | "post" | "compare">(allPre.length > 0 ? "pre" : "post");
+  // Choosing a period in the Medical Conditions filter shows that sub-tab.
+  useEffect(() => {
+    if (condTiming === "pre-incident") setCondView("pre");
+    else if (condTiming === "post-incident") setCondView("post");
+  }, [condTiming]);
   const [detailSignal, setDetailSignal] = useState<AnalysisFinding | null>(null);
   const detailPair = detailSignal ? pairOf(detailSignal) : undefined;
   // A signal's evidence opens in the same review workspace as a timeline card —
@@ -2093,23 +2130,55 @@ export function MedicalTimelineTab({
               pre-existing one, its card says so; severity and relationship appear only where the record assesses them.
             </p>
             <button
-              onClick={() => setCompareOpen(true)}
+              onClick={() => setCondView("compare")}
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-line bg-white text-sm font-semibold text-deep hover:border-brand hover:bg-tint transition-colors shrink-0"
             >
               Compare Pre &amp; Post-Incident <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
             </button>
           </div>
 
+          {/* Sub-tabs — the same tab treatment as the chronology tabs above */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {([
+              { key: "pre", label: "Pre-Incident", count: preSignals.length },
+              { key: "post", label: "Post-Incident", count: postSignals.length },
+              { key: "compare", label: "Compare", count: compareRows.length },
+            ] as const).map((t) => {
+              const active = condView === t.key;
+              return (
+                <button
+                  key={t.key}
+                  onClick={() => setCondView(t.key)}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                    active ? "bg-tint border-brand text-deep" : "bg-white border-line text-[#5B6B78] hover:border-soft hover:text-ink"
+                  }`}
+                >
+                  {t.label}
+                  <span className={`inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-semibold ${
+                    active ? "bg-brand text-white" : "bg-track text-[#5B6B78]"
+                  }`}>{t.count}</span>
+                </button>
+              );
+            })}
+          </div>
+
           {injurySignals.length === 0 ? (
             <div className="text-center py-16 secondary-text">No Injury Signals have been identified for this case.</div>
-          ) : narrowed && !timingView && visibleConditions === 0 ? (
-            <div className="text-center py-16 secondary-text">No conditions match the current filters.</div>
+          ) : condView === "compare" ? (
+            <section className="space-y-4">
+              <div className="flex items-center gap-2.5 pb-3 border-b border-line">
+                <div className="w-8 h-8 rounded-lg bg-tint flex items-center justify-center shrink-0">
+                  <ArrowRight className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                </div>
+                <h3 className="card-title flex-1">Compare Pre &amp; Post-Incident</h3>
+              </div>
+              <ConditionCompareView rows={compareRows} unlinkedPost={unlinkedPost} onReviewPost={() => setCondView("post")} />
+            </section>
           ) : (
             <>
               {([
                 {
                   key: "pre", title: "Pre-Incident Medical Conditions", icon: History, list: preSignals,
-                  show: condTiming === "all" || condTiming === "pre-incident" || preSignals.length > 0,
                   expanded: preExpanded, setExpanded: setPreExpanded,
                   empty: narrowed && !timingView
                     ? "No pre-incident conditions match the current filters."
@@ -2117,13 +2186,12 @@ export function MedicalTimelineTab({
                 },
                 {
                   key: "post", title: "Post-Incident Medical Conditions", icon: Activity, list: postSignals,
-                  show: condTiming === "all" || condTiming === "post-incident" || postSignals.length > 0,
                   expanded: postExpanded, setExpanded: setPostExpanded,
                   empty: narrowed
                     ? "No post-incident conditions match the current filters."
                     : "No post-incident conditions are documented in the case record.",
                 },
-              ] as const).filter((sec) => sec.show).map((sec) => {
+              ] as const).filter((sec) => sec.key === condView).map((sec) => {
                 const visible = sec.expanded ? sec.list : sec.list.slice(0, CONDITION_PREVIEW);
                 const remaining = sec.list.length - CONDITION_PREVIEW;
                 return (
@@ -2170,7 +2238,7 @@ export function MedicalTimelineTab({
               })}
 
               {/* Signals the record does not place before or after the incident */}
-              {untimedSignals.length > 0 && (
+              {condView === "post" && untimedSignals.length > 0 && (
                 <section className="space-y-4">
                   <h3 className="card-title pb-3 border-b border-line">Timing Not Established</h3>
                   <div className="grid grid-cols-1 @xl:grid-cols-2 @3xl:grid-cols-3 gap-4">
@@ -2511,7 +2579,6 @@ export function MedicalTimelineTab({
         onPreview={(s) => { setDetailSignal(null); openSignalEvidence(s); }}
       />
     )}
-    {compareOpen && <ConditionCompareDrawer rows={compareRows} unlinkedPost={unlinkedPost} onClose={() => setCompareOpen(false)} />}
 
     {/* Evidence Review Workspace — PDF viewer + AI analysis tools */}
     <EvidenceReviewModal
@@ -4696,8 +4763,9 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
                     onClick={() => openEvidence(i)}
                     className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-offwhite px-3 py-2 text-sm text-ink cursor-pointer hover:border-brand hover:bg-tint hover:shadow-sm transition-all"
                   >
-                    <FileText className="w-4 h-4 text-deep shrink-0" strokeWidth={1.75} />
+                    <FileTypeIcon name={d.primary} className="w-4 h-4 text-deep shrink-0" />
                     <span className="truncate max-w-[180px]">{d.primary}</span>
+                    <FileTypeTag name={d.primary} />
                   </button>
                   {d.docCount > 1 && (
                     <button
@@ -4780,8 +4848,9 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
                       onClick={() => openFactorDoc(f.category, primary)}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-offwhite px-3 py-2 text-sm text-ink cursor-pointer hover:border-brand hover:bg-tint hover:shadow-sm transition-all"
                     >
-                      <FileText className="w-4 h-4 text-deep shrink-0" strokeWidth={1.75} />
+                      <FileTypeIcon name={primary} className="w-4 h-4 text-deep shrink-0" />
                       <span className="truncate max-w-[180px]">{primary}</span>
+                      <FileTypeTag name={primary} />
                     </button>
                     {f.docCount > 1 && (
                       <button
@@ -4924,8 +4993,9 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
                       <button onClick={() => toggleDocRow(doc.name)} className="w-full text-left px-3 py-2.5 hover:bg-wash transition-colors">
                         <div className="eyebrow text-[#8A98A3] mb-1.5">Document {String(i + 1).padStart(2, "0")}</div>
                         <div className="flex items-center gap-2">
-                          <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+                          <FileTypeIcon name={doc.name} className="w-3.5 h-3.5 text-deep shrink-0" />
                           <span className="text-xs font-medium text-ink truncate flex-1">{doc.name}</span>
+                          <FileTypeTag name={doc.name} />
                           <span className="text-xs font-semibold text-ink tabular-nums shrink-0">{formatUSD(doc.amount)}</span>
                           <ChevronDown className={`w-3.5 h-3.5 text-deep shrink-0 transition-transform ${open ? "rotate-180" : ""}`} strokeWidth={1.75} />
                         </div>
@@ -5356,8 +5426,9 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
                             onClick={() => openFactorDoc(detailFactor, name)}
                             className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-line bg-white hover:bg-wash transition-colors text-left"
                           >
-                            <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+                            <FileTypeIcon name={name} className="w-3.5 h-3.5 text-deep shrink-0" />
                             <span className="text-sm text-ink truncate">{name}</span>
+                            <FileTypeTag name={name} />
                           </button>
                         ))}
                         {docNames.length > 5 && (
@@ -5541,8 +5612,9 @@ function EvidenceEditor({
       <div className="flex flex-wrap gap-1.5">
         {docs.map((d) => (
           <span key={d} className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-white pl-2.5 pr-1.5 py-1.5 text-xs text-ink">
-            <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+            <FileTypeIcon name={d} className="w-3.5 h-3.5 text-deep shrink-0" />
             <span className="truncate max-w-[180px]">{d}</span>
+            <FileTypeTag name={d} />
             <button
               onClick={() => onChange(docs.filter((x) => x !== d))}
               title={`Remove ${d} from this ${subject}`}
@@ -5589,8 +5661,9 @@ function EvidenceEditor({
                   <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${on ? "bg-brand border-brand" : "border-line bg-white"}`}>
                     {on && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
                   </span>
-                  <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+                  <FileTypeIcon name={d} className="w-3.5 h-3.5 text-deep shrink-0" />
                   <span className="mono-ref text-ink truncate">{d}</span>
+                  <FileTypeTag name={d} />
                 </button>
               );
             })}
@@ -6035,8 +6108,9 @@ export function NonEconomicDamagesTab({ goTo, documents }: TabProps) {
                         onClick={() => openNeg(i, "preview")}
                         className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-offwhite px-2.5 py-1.5 text-xs text-ink cursor-pointer hover:border-brand hover:bg-tint hover:shadow-sm transition-all"
                       >
-                        <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+                        <FileTypeIcon name={d} className="w-3.5 h-3.5 text-deep shrink-0" />
                         <span className="truncate max-w-[180px]">{d}</span>
+                        <FileTypeTag name={d} />
                       </button>
                     ))}
                     {more > 0 && (
@@ -6725,7 +6799,7 @@ export function LiabilityAnalysisTab({ goTo, documents }: TabProps) {
                       <div className="space-y-1.5 mt-1.5">
                         {v.evidence.slice(1).map((doc) => (
                           <div key={doc} className="flex items-center gap-2 rounded-lg bg-white border border-line px-2.5 py-1.5 min-w-0">
-                            <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} /><span className="mono-ref truncate" title={doc}>{doc}</span>
+                            <FileTypeIcon name={doc} className="w-3.5 h-3.5 text-deep shrink-0" /><span className="mono-ref truncate" title={doc}>{doc}</span> <FileTypeTag name={doc} />
                           </div>
                         ))}
                       </div>
@@ -6907,11 +6981,11 @@ export function EvidenceRepositoryTab({ documents }: TabProps) {
                   {g.docs.map((d) => (
                     <div key={d.id} className="flex items-center gap-4 px-5 py-4">
                       <div className="w-9 h-9 rounded-lg bg-tint flex items-center justify-center shrink-0">
-                        <FileText className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                        <FileTypeIcon name={d.name} className="w-4 h-4 text-deep" />
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-medium text-ink truncate">{d.name}</div>
-                        <div className="mono-ref">{d.source} · {d.date}</div>
+                        <div className="mono-ref flex items-center gap-2"><FileTypeTag name={d.name} />{d.source} · {d.date}</div>
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
                         <button title="Preview" className="p-2 rounded-lg text-[#5B6B78] hover:text-deep hover:bg-tint transition-colors"><Eye className="w-4 h-4" strokeWidth={1.75} /></button>

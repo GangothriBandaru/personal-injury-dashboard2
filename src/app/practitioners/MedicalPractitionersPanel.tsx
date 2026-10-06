@@ -5,7 +5,7 @@ import {
   Clock, Layers, Landmark, Network, Map as MapIcon, ArrowRight,
 } from "lucide-react";
 import {
-  PRACTITIONERS, HOSPITALS, HOSPITAL_SIZES, HOSPITAL_OWNERSHIPS, medicalProvidersForCase,
+  PRACTITIONERS, HOSPITALS, HOSPITAL_SIZES, HOSPITAL_OWNERSHIPS, medicalProvidersForCase, practitionersAtProvider,
   HOSPITAL_STRUCTURES, LOCATION_TYPES, hospitalById, practitionerById, formatExperience, hospitalSummary,
   type Practitioner, type Hospital,
 } from "./practitionerData";
@@ -244,7 +244,7 @@ function SimilarSearch({
               <div key={p.id} className="rounded-xl border border-line bg-white p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="card-title leading-snug">{p.name}</div>
+                    <div className="card-title leading-snug flex items-center gap-2 flex-wrap">{p.name}{p.demo && <DemoBadge />}</div>
                     <div className="secondary-text">{p.role}</div>
                   </div>
                   {s != null && <span className="text-xs font-bold text-deep shrink-0">{s}% Match</span>}
@@ -273,7 +273,7 @@ function SimilarSearch({
             <p className="rounded-xl border border-dashed border-line bg-white p-5 secondary-text">No hospitals match the selected filters.</p>
           ) : hospitalResults.map((h) => (
             <div key={h.id} className="rounded-xl border border-line bg-white p-4">
-              <div className="card-title leading-snug">{h.name}</div>
+              <div className="card-title leading-snug flex items-center gap-2 flex-wrap">{h.name}{h.demo && <DemoBadge />}</div>
               <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
                 {([
                   ["Size", h.size], ["Type", h.structure], ["Ownership", h.ownership], ["System", h.healthSystem],
@@ -311,6 +311,7 @@ function PractitionerProfile({ p, onHospital, onFindSimilar }: { p: Practitioner
     .filter((x) => x.other);
   return (
     <div className="space-y-4">
+      {(p.demo || h?.demo) && <DemoNotice />}
       <Section icon={UserRound} title="Practitioner Information">
         <Fact label="Medical Practitioner Name" value={p.name} />
         <Fact label="Practitioner Type / Role" value={p.role} />
@@ -351,31 +352,61 @@ function PractitionerProfile({ p, onHospital, onFindSimilar }: { p: Practitioner
   );
 }
 
-function HospitalProfile({ h, onPractitioner }: { h: Hospital; onPractitioner: (id: string) => void }) {
-  const staff = PRACTITIONERS.filter((p) => p.hospitalId === h.id);
+// Stated at the top of a profile that holds demo data.
+function DemoNotice() {
+  return (
+    <div className="rounded-xl border border-line bg-white p-3 flex items-center gap-2 flex-wrap">
+      <DemoBadge />
+      <span className="secondary-text">Some details here are demo data for the prototype, not from the case record.</span>
+    </div>
+  );
+}
+
+// The selected provider: its workplace facts, then every practitioner the open
+// case links to it, each with the same hierarchy as the Medical Practitioners
+// card — designation, specialization, experience, biography.
+function HospitalProfile({ h, caseRef, onPractitioner }: { h: Hospital; caseRef?: string; onPractitioner: (id: string) => void }) {
+  const staff = practitionersAtProvider(h.id, caseRef);
   return (
     <div className="space-y-4">
+      {(h.demo || staff.some((p) => p.demo)) && <DemoNotice />}
       <Section icon={Building2} title="Workplace Information">
         <WorkplaceFacts hospital={h} />
       </Section>
       <Section icon={Stethoscope} title="Practitioners on Record">
+        <p className="secondary-text mb-1">{staff.length} {staff.length === 1 ? "practitioner" : "practitioners"}</p>
         {staff.length === 0 ? (
-          <p className="text-sm text-[#8A98A3] py-2">No practitioner is recorded at this hospital.</p>
+          <p className="text-sm text-[#8A98A3] py-2">No named practitioner identified.</p>
         ) : staff.map((p) => (
-          <button key={p.id} onClick={() => onPractitioner(p.id)} className="w-full flex items-center justify-between gap-3 py-2.5 border-b border-line last:border-b-0 text-left group">
-            <span className="min-w-0">
-              <span className="block text-sm font-semibold text-ink group-hover:text-deep transition-colors">{p.name}</span>
-              <span className="block secondary-text">{p.role}</span>
-            </span>
-            <ChevronRight className="w-4 h-4 text-[#8A98A3] shrink-0" strokeWidth={1.75} />
-          </button>
+          <div key={p.id} className="py-3 border-b border-line last:border-b-0">
+            <button onClick={() => onPractitioner(p.id)} className="w-full flex items-center justify-between gap-3 text-left group">
+              <span className="flex items-center gap-2 flex-wrap min-w-0">
+                <span className="text-sm font-semibold text-ink group-hover:text-deep transition-colors">{p.name}</span>
+                {p.demo && <DemoBadge />}
+              </span>
+              <ChevronRight className="w-4 h-4 text-[#8A98A3] shrink-0" strokeWidth={1.75} />
+            </button>
+            <div className="grid grid-cols-2 gap-x-4">
+              <Fact label="Designation" value={p.role} />
+              <Fact label="Specialization" value={p.specializations.join(" · ") || undefined} />
+              <Fact label="Experience" value={formatExperience(p.experienceYears)} />
+            </div>
+            <div className="pt-2.5">
+              <div className="eyebrow mb-0.5">Biography</div>
+              {p.biography
+                ? <p className="body-text leading-relaxed">{p.biography}</p>
+                : <p className="text-sm text-[#8A98A3]">Biography not available.</p>}
+            </div>
+          </div>
         ))}
       </Section>
     </div>
   );
 }
 
-function PractitionerDrawer({ stack, setStack, onClose }: { stack: View[]; setStack: (s: View[]) => void; onClose: () => void }) {
+function PractitionerDrawer({
+  stack, setStack, onClose, caseRef,
+}: { stack: View[]; setStack: (s: View[]) => void; onClose: () => void; /** The open case, so a provider shows its own practitioners. */ caseRef?: string }) {
   const view = stack[stack.length - 1];
   const push = (v: View) => setStack([...stack, v]);
   const back = () => setStack(stack.slice(0, -1));
@@ -413,7 +444,7 @@ function PractitionerDrawer({ stack, setStack, onClose }: { stack: View[]; setSt
               onFindSimilar={() => push({ kind: "search", fromId: p.id })}
             />
           )}
-          {h && <HospitalProfile h={h} onPractitioner={(id) => push({ kind: "practitioner", id })} />}
+          {h && <HospitalProfile key={h.id} h={h} caseRef={caseRef} onPractitioner={(id) => push({ kind: "practitioner", id })} />}
           {view.kind === "search" && (
             <SimilarSearch
               key={view.fromId}
@@ -429,12 +460,17 @@ function PractitionerDrawer({ stack, setStack, onClose }: { stack: View[]; setSt
 }
 
 // ── The Chronology sidebar: Medical Practitioners ────────────────────────────
-// The Case Snapshot card adapted for the practitioners who treated the
-// plaintiff in the case that is open: one light-gray tile per practitioner,
-// each opening to the same information tiles and biography, then the treating
-// facilities where no practitioner is named, then the discovery search. The
-// card shows what the case's own provider record holds — one practitioner or
-// ten — and nothing from any other case.
+// The Case Snapshot card adapted for the case's medical providers. Each
+// provider (a facility) is an accordion section, and the practitioner(s) who
+// treated the plaintiff there sit directly beneath it, so it is plain which
+// practitioner belongs to which provider. A provider with no practitioner named
+// says so. Demo data is badged wherever it appears. The provider list scrolls
+// inside the card; Find Similar Doctors stays fixed at its foot.
+
+// Marks a record that is demo data for the prototype, not from the case.
+export function DemoBadge() {
+  return <span className="pill pill-progress shrink-0" title="Demo data — not from the case record">Demo data</span>;
+}
 
 // A Case Snapshot information tile. A value the record does not hold reads
 // "Not available" in the muted tone.
@@ -454,124 +490,167 @@ function SnapshotTile({ icon: Icon, label, value }: { icon: any; label: string; 
   );
 }
 
-// Past this many practitioners the list scrolls inside the card, so the
-// sidebar does not grow with the case.
-const PRACTITIONER_LIST_SCROLL_AFTER = 3;
+// One practitioner under their provider: name and designation, the biography
+// toggle and the information tiles.
+function ProviderPractitioner({ p, provider, onProfile }: { p: Practitioner; provider: Hospital; onProfile: () => void }) {
+  const [bioOpen, setBioOpen] = useState(false);
+  // The hospital on the practitioner's own record, when it differs from the
+  // provider they are grouped under — stated, not reconciled.
+  const ownHospital = p.hospitalId && p.hospitalId !== provider.id ? hospitalById(p.hospitalId) : undefined;
+  return (
+    <div className="rounded-xl border border-line bg-offwhite p-3">
+      <div className="flex items-center justify-between gap-2 mb-1.5">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <UserRound className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+          <span className="eyebrow truncate">Medical Practitioner</span>
+        </div>
+        <button
+          onClick={() => setBioOpen((o) => !o)}
+          aria-expanded={bioOpen}
+          className="flex items-center gap-1 text-xs font-medium text-deep hover:text-ink transition-colors shrink-0"
+        >
+          {bioOpen ? "Hide biography" : "View biography"}
+          <ChevronDown className={`w-3.5 h-3.5 transition-transform ${bioOpen ? "rotate-180" : ""}`} strokeWidth={1.75} />
+        </button>
+      </div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <button onClick={onProfile} title="Open the full profile" className="text-left text-sm font-semibold text-ink leading-snug hover:text-deep transition-colors">
+          {p.name}
+        </button>
+        {p.demo && <DemoBadge />}
+      </div>
+      <div className="text-xs text-[#5B6B78] mt-0.5">{p.role}</div>
+      {bioOpen && (
+        <p className="secondary-text leading-relaxed mt-2.5 pt-2.5 border-t border-line">{p.biography ?? "Biography not available."}</p>
+      )}
+
+      <div className="grid grid-cols-2 gap-2 mt-2.5">
+        <SnapshotTile icon={Stethoscope} label="Specialization" value={p.specializations.join(" · ") || undefined} />
+        <SnapshotTile icon={Clock} label="Experience" value={formatExperience(p.experienceYears)} />
+        <SnapshotTile icon={Building2} label="Hospital / Workplace" value={provider.name} />
+        <SnapshotTile icon={MapPin} label="Hospital Location" value={provider.location} />
+        <SnapshotTile icon={Layers} label="Hospital Size" value={provider.size} />
+        <SnapshotTile icon={Landmark} label="Hospital Type" value={provider.ownership} />
+        <SnapshotTile
+          icon={Network}
+          label="Organization"
+          value={provider.structure && provider.healthSystem ? `${provider.structure} — ${provider.healthSystem}` : provider.structure}
+        />
+        <SnapshotTile icon={MapIcon} label="Location Type" value={provider.locationType} />
+      </div>
+      {provider.demo && (
+        <p className="text-xs text-[#5B6B78] mt-2">Hospital details above are demo values, not from the case record.</p>
+      )}
+      {ownHospital && (
+        <p className="text-xs text-[#5B6B78] mt-2">Hospital on the practitioner&apos;s own record: {ownHospital.name}</p>
+      )}
+    </div>
+  );
+}
 
 export function PractitionerSnapshotCard({ caseRef }: { caseRef?: string }) {
-  const { practitioners, unnamedFacilities } = medicalProvidersForCase(caseRef);
-  // Which practitioner's details are open. A case with a single practitioner
-  // opens on them; with several, the list starts collapsed so all are in view.
-  const [openId, setOpenId] = useState<string | null>(practitioners.length === 1 ? practitioners[0].id : null);
+  const { groups, practitionerCount } = medicalProvidersForCase(caseRef);
+  // Which providers are open — the first, to start. Each opens and closes on
+  // its own; the most recently opened one is the active provider.
+  const [openIds, setOpenIds] = useState<Set<string>>(() => new Set(groups[0] ? [groups[0].provider.id] : []));
+  const [activeId, setActiveId] = useState<string | undefined>(groups[0]?.provider.id);
   const [stack, setStack] = useState<View[]>([]);
-  // The search starts from the practitioner being read, or the first listed.
-  const reference = practitioners.find((p) => p.id === openId) ?? practitioners[0];
+  const toggle = (id: string) =>
+    setOpenIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else { next.add(id); setActiveId(id); }
+      return next;
+    });
+  // Find Similar Doctors starts from the active provider's practitioner, else
+  // the first practitioner on the case.
+  const reference =
+    groups.find((g) => g.provider.id === activeId)?.practitioners[0] ?? groups.flatMap((g) => g.practitioners)[0];
 
   return (
     <>
-      <div className="lg-card p-6">
-        <h3 className="card-title mb-4">
-          Medical Practitioners <span className="text-[#5B6B78] font-medium">· {practitioners.length}</span>
+      <div className="lg-card p-6 flex flex-col">
+        <h3 className="card-title">
+          Medical Practitioners{" "}
+          <span className="text-[#5B6B78] font-medium">· {groups.length} {groups.length === 1 ? "Provider" : "Providers"}</span>
         </h3>
+        <p className="secondary-text mt-0.5 mb-4">
+          {practitionerCount} named {practitionerCount === 1 ? "practitioner" : "practitioners"}
+        </p>
 
-        {practitioners.length === 0 ? (
-          <p className="secondary-text">No practitioners are named in this case&apos;s record.</p>
+        {groups.length === 0 ? (
+          <p className="secondary-text">No medical providers are on this case&apos;s record.</p>
         ) : (
-          <div
-            className={`space-y-2.5 ${
-              practitioners.length > PRACTITIONER_LIST_SCROLL_AFTER ? "max-h-[420px] overflow-y-auto overscroll-contain pr-1" : ""
-            }`}
-          >
-            {practitioners.map((p) => {
-              const h = hospitalById(p.hospitalId);
-              const open = openId === p.id;
+          // The provider list scrolls inside the card, sized to the window so the
+          // whole card — Find Similar Doctors included — stays in view.
+          <div className="max-h-[max(220px,calc(100vh-570px))] overflow-y-auto overscroll-contain -mr-2 pr-2 space-y-2.5">
+            {groups.map(({ provider, practitioners }) => {
+              const open = openIds.has(provider.id);
               return (
-                <div key={p.id} className="rounded-xl border border-line bg-offwhite p-3">
-                  <div className="flex items-center justify-between gap-2 mb-1.5">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <UserRound className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
-                      <span className="eyebrow truncate">Medical Practitioner</span>
+                <section key={provider.id} className="rounded-xl border border-line bg-white">
+                  {/* The provider — the accordion header its practitioners sit under */}
+                  <button
+                    onClick={() => toggle(provider.id)}
+                    aria-expanded={open}
+                    className="w-full flex items-center gap-2.5 p-3 text-left hover:bg-wash rounded-xl transition-colors"
+                  >
+                    <div className="w-8 h-8 rounded-lg bg-tint flex items-center justify-center shrink-0">
+                      <Building2 className="w-4 h-4 text-deep" strokeWidth={1.75} />
                     </div>
-                    <button
-                      onClick={() => setOpenId(open ? null : p.id)}
-                      aria-expanded={open}
-                      className="flex items-center gap-1 text-xs font-medium text-deep hover:text-ink transition-colors shrink-0"
-                    >
-                      {open ? "Hide profile" : "View profile"}
-                      <ChevronDown className={`w-3.5 h-3.5 transition-transform ${open ? "rotate-180" : ""}`} strokeWidth={1.75} />
-                    </button>
-                  </div>
-                  <div className="text-sm font-semibold text-ink leading-snug break-words">{p.name}</div>
-                  <div className="text-xs text-[#5B6B78] mt-0.5">{p.role}</div>
-                  <div className="text-xs text-[#5B6B78]">{h?.name ?? `Workplace ${NA.toLowerCase()}`}</div>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-xs font-semibold uppercase tracking-[0.08em] text-ink leading-snug">{provider.name}</span>
+                      <span className="block text-xs text-[#5B6B78] mt-0.5">
+                        {practitioners.length} {practitioners.length === 1 ? "practitioner" : "practitioners"}
+                      </span>
+                    </span>
+                    <ChevronDown className={`w-4 h-4 text-deep shrink-0 transition-transform ${open ? "rotate-180" : ""}`} strokeWidth={1.75} />
+                  </button>
 
                   {open && (
-                    <div className="mt-2.5 pt-2.5 border-t border-line">
-                      <div className="eyebrow mb-1">Biography</div>
-                      <p className="secondary-text leading-relaxed">{p.biography ?? "Biography not available."}</p>
-                      <div className="grid grid-cols-2 gap-2 mt-2.5">
-                        <SnapshotTile icon={Stethoscope} label="Specialization" value={p.specializations.join(" · ") || undefined} />
-                        <SnapshotTile icon={Clock} label="Experience" value={formatExperience(p.experienceYears)} />
-                        <SnapshotTile icon={Building2} label="Hospital / Workplace" value={h?.name} />
-                        <SnapshotTile icon={MapPin} label="Hospital Location" value={h?.location} />
-                        <SnapshotTile icon={Layers} label="Hospital Size" value={h?.size} />
-                        <SnapshotTile icon={Landmark} label="Hospital Type" value={h?.ownership} />
-                        <SnapshotTile
-                          icon={Network}
-                          label="Organization"
-                          value={h?.structure && h.healthSystem ? `${h.structure} — ${h.healthSystem}` : h?.structure}
+                    <div className="px-3 pb-3 space-y-2.5">
+                      {practitioners.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-line bg-white p-3 text-sm text-[#8A98A3]">
+                          No named practitioner identified
+                        </div>
+                      ) : practitioners.map((p) => (
+                        <ProviderPractitioner
+                          key={p.id}
+                          p={p}
+                          provider={provider}
+                          onProfile={() => setStack([{ kind: "practitioner", id: p.id }])}
                         />
-                        <SnapshotTile icon={MapIcon} label="Location Type" value={h?.locationType} />
-                      </div>
+                      ))}
                       <button
-                        onClick={() => setStack([{ kind: "practitioner", id: p.id }])}
-                        className="mt-2.5 inline-flex items-center gap-1 text-xs font-semibold text-deep hover:text-ink transition-colors"
+                        onClick={() => setStack([{ kind: "hospital", id: provider.id }])}
+                        className="inline-flex items-center gap-1 text-xs font-semibold text-deep hover:text-ink transition-colors"
                       >
-                        Open full profile <ArrowRight className="w-3.5 h-3.5" strokeWidth={2} />
+                        View provider <ArrowRight className="w-3.5 h-3.5" strokeWidth={2} />
                       </button>
                     </div>
                   )}
-                </div>
+                </section>
               );
             })}
           </div>
         )}
 
-        {/* Where care happened with no practitioner named — counted apart from
-            the practitioners, and never given a name. */}
-        {unnamedFacilities.length > 0 && (
-          <div className="mt-4 pt-3 border-t border-line">
-            <div className="eyebrow mb-1.5">Treating Facilities — No Practitioner Named · {unnamedFacilities.length}</div>
-            {unnamedFacilities.map((f) => (
-              <button
-                key={f.id}
-                onClick={() => setStack([{ kind: "hospital", id: f.id }])}
-                className="w-full flex items-center justify-between gap-2 py-1.5 text-left text-sm text-ink hover:text-deep transition-colors"
-              >
-                <span className="flex items-center gap-1.5 min-w-0">
-                  <Building2 className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
-                  <span className="truncate">{f.name}</span>
-                </span>
-                <ChevronRight className="w-4 h-4 text-[#8A98A3] shrink-0" strokeWidth={1.75} />
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Find Similar Practitioners — styled as Case Snapshot's View Chronology */}
+        {/* Find Similar Doctors — one, fixed at the foot of the card */}
         {reference && (
-          <button
-            onClick={() => setStack([{ kind: "search", fromId: reference.id }])}
-            className="btn btn-primary w-full gap-2 mt-4"
-          >
-            Find Similar Practitioners <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
-          </button>
+          <div className="pt-4 mt-4 border-t border-line shrink-0">
+            <button
+              onClick={() => setStack([{ kind: "search", fromId: reference.id }])}
+              title={`Similar to ${reference.name}`}
+              className="btn btn-primary w-full gap-2"
+            >
+              Find Similar Doctors <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
+            </button>
+          </div>
         )}
       </div>
 
       {/* Rendered at the page root, above the workspace header. */}
       {stack.length > 0 && createPortal(
-        <PractitionerDrawer stack={stack} setStack={setStack} onClose={() => setStack([])} />,
+        <PractitionerDrawer stack={stack} setStack={setStack} onClose={() => setStack([])} caseRef={caseRef} />,
         document.body,
       )}
     </>

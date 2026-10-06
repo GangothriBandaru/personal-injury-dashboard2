@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { FileTypeIcon, FileTypeTag } from "../components/fileType";
 import { Sparkles, FileText, Check, DollarSign, Trash2, ArrowRight, X, AlertTriangle } from "lucide-react";
 import { formatDamageUSD } from "../damages/DamagesContext";
 import type {
@@ -126,7 +127,7 @@ export function ProposedDamageEdit({
             <div className="flex flex-wrap gap-1.5">
               {proposal.sources.map((d) => (
                 <span key={d} className="inline-flex items-center gap-1.5 rounded-md border border-line bg-offwhite px-2.5 py-1 text-xs text-ink">
-                  <FileText className="w-3.5 h-3.5 text-deep" strokeWidth={1.75} /> {d}
+                  <FileTypeIcon name={d} className="w-3.5 h-3.5 text-deep" /> {d} <FileTypeTag name={d} />
                 </span>
               ))}
             </div>
@@ -341,7 +342,7 @@ export function SuggestedDamage({
       <div className="flex flex-wrap gap-1.5 mt-2">
         {suggestion.docs.map((d) => (
           <span key={d} className="inline-flex items-center gap-1.5 rounded-md border border-line bg-white px-2.5 py-1 text-xs text-ink">
-            <FileText className="w-3.5 h-3.5 text-deep" strokeWidth={1.75} /> {d}
+            <FileTypeIcon name={d} className="w-3.5 h-3.5 text-deep" /> {d} <FileTypeTag name={d} />
           </span>
         ))}
       </div>

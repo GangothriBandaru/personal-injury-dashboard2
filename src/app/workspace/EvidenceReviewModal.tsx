@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { FileTypeIcon, FileTypeTag } from "../components/fileType";
 import {
   X, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, RotateCw, ShieldCheck, Send,
   Download, Sparkles, Lightbulb, FileText, Stethoscope, AlertTriangle, MessageSquare, CheckCircle, UserPlus,
@@ -163,8 +164,9 @@ function InsightsView({ docs, onSelectDoc }: { docs: EvidenceDoc[]; onSelectDoc:
         <div className="flex flex-col gap-2">
           {docs.map((d, idx) => (
             <button key={d.id ?? d.name} onClick={() => onSelectDoc(idx)} className="flex items-center gap-2 rounded-lg border border-line bg-offwhite px-3 py-2 text-sm text-ink text-left hover:border-brand hover:bg-tint transition-all">
-              <FileText className="w-4 h-4 text-deep shrink-0" strokeWidth={1.75} />
+              <FileTypeIcon name={d.name} className="w-4 h-4 text-deep shrink-0" />
               <span className="truncate">{d.name}</span>
+              <FileTypeTag name={d.name} />
             </button>
           ))}
         </div>
@@ -201,7 +203,7 @@ function KeyActionsView({ actions, onJumpToEvidence }: { actions: KeyAction[]; o
                         onClick={() => onJumpToEvidence(e)}
                         className="inline-flex items-center gap-1.5 rounded-md border border-line bg-offwhite px-2.5 py-1 text-xs text-ink hover:border-brand hover:bg-tint transition-all"
                       >
-                        <FileText className="w-3.5 h-3.5 text-deep" strokeWidth={1.75} /> {e}
+                        <FileTypeIcon name={e} className="w-3.5 h-3.5 text-deep" /> {e} <FileTypeTag name={e} />
                       </button>
                     ))}
                   </div>
@@ -303,8 +305,9 @@ export function EvidenceReviewModal({ open, title, date, time, insight, descript
         <div className="w-[60%] flex flex-col border-r border-line bg-[#F1F3F5] min-w-0">
           {/* Toolbar */}
           <div className="flex items-center gap-2 px-4 py-2.5 bg-white border-b border-line shrink-0">
-            <FileText className="w-4 h-4 text-deep shrink-0" strokeWidth={1.75} />
+            <FileTypeIcon name={doc.name} className="w-4 h-4 text-deep shrink-0" />
             <span className="mono-ref text-ink truncate">{doc.name}</span>
+            <FileTypeTag name={doc.name} />
             <div className="ml-auto flex items-center gap-1 shrink-0">
               {/* Page nav */}
               <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1} className="p-1.5 rounded-lg hover:bg-tint disabled:opacity-40 transition-colors"><ChevronLeft className="w-4 h-4 text-[#5B6B78]" strokeWidth={1.75} /></button>
@@ -333,8 +336,9 @@ export function EvidenceReviewModal({ open, title, date, time, insight, descript
                       active ? "bg-tint border-brand text-deep shadow-sm" : "bg-white border-line text-ink hover:border-soft hover:bg-wash"
                     }`}
                   >
-                    <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+                    <FileTypeIcon name={d.name} className="w-3.5 h-3.5 text-deep shrink-0" />
                     <span className="truncate max-w-[200px]">{d.name}</span>
+                    <FileTypeTag name={d.name} />
                   </button>
                 );
               })}
@@ -411,8 +415,9 @@ export function EvidenceReviewModal({ open, title, date, time, insight, descript
                             active ? "bg-tint border-brand text-deep shadow-sm" : "bg-offwhite border-line text-ink hover:border-soft hover:bg-wash"
                           }`}
                         >
-                          <FileText className="w-4 h-4 text-deep shrink-0" strokeWidth={1.75} />
+                          <FileTypeIcon name={d.name} className="w-4 h-4 text-deep shrink-0" />
                           <span className="truncate">{d.name}</span>
+                          <FileTypeTag name={d.name} />
                         </button>
                       );
                     })}

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { FileTypeIcon, FileTypeTag } from "../components/fileType";
 import { Sparkles, FileText, Check, Calendar, X } from "lucide-react";
 import type { ChronCandidate, ChronEdit } from "./chronologyActions";
 
@@ -95,7 +96,7 @@ export function ProposedEvent({
             <div className="flex flex-wrap gap-1.5">
               {draft.evidence.map((d) => (
                 <span key={d} className="inline-flex items-center gap-1.5 rounded-md border border-line bg-offwhite px-2.5 py-1 text-xs text-ink">
-                  <FileText className="w-3.5 h-3.5 text-deep" strokeWidth={1.75} /> {d}
+                  <FileTypeIcon name={d} className="w-3.5 h-3.5 text-deep" /> {d} <FileTypeTag name={d} />
                 </span>
               ))}
             </div>
@@ -176,7 +177,7 @@ export function ProposedEdit({
           <div className="flex flex-wrap gap-1.5">
             {edit.sources.map((d) => (
               <span key={d} className="inline-flex items-center gap-1.5 rounded-md border border-line bg-offwhite px-2.5 py-1 text-xs text-ink">
-                <FileText className="w-3.5 h-3.5 text-deep" strokeWidth={1.75} /> {d}
+                <FileTypeIcon name={d} className="w-3.5 h-3.5 text-deep" /> {d} <FileTypeTag name={d} />
               </span>
             ))}
           </div>

@@ -2,10 +2,10 @@ import { useState, useEffect } from "react";
 import { StageNavigator } from "../components/StageNavigator";
 import {
   ChevronLeft, CheckCircle, ChevronDown, ChevronRight,
-  FileText, ExternalLink,
-  ClipboardList, Brain, BarChart2,
+  ExternalLink, BarChart2,
   ArrowRight, Flag, Circle, Shield
 } from "lucide-react";
+import { DELIVERABLES, type DeliverableKind } from "./DeliverablePage";
 import { INSURANCE_ANALYSIS } from "../insurance/insuranceData";
 import { Button } from "../components/ui/button";
 import {
@@ -28,6 +28,8 @@ interface CaseReadyPageProps {
   onOpenWorkspace?: () => void;
   /** Opens the Insurance Policy Analysis — the same pages Analysis opens. */
   onOpenInsurance?: () => void;
+  /** Opens one of the Generated Deliverables on its own page. */
+  onOpenDeliverable?: (kind: DeliverableKind) => void;
   /** Section to bring into view on arrival — used when returning from a sub-page. */
   scrollToSection?: string;
 }
@@ -42,42 +44,10 @@ const CHECKLIST_DETAILS: Record<string, string> = {
   "Case workspace generated": "All exhibits, chronologies, and demand parameters are staged for attorney review.",
 };
 
-const deliverables = [
-  {
-    title: "Medical Chronology",
-    category: "Medical",
-    description: "Complete treatment timeline from incident through present.",
-    date: "Jun 9, 2026",
-    icon: ClipboardList,
-    color: "bg-tint text-deep",
-  },
-  {
-    title: "Evidence Structure",
-    category: "Liability",
-    description: "Organized exhibit map across all verified documents.",
-    date: "Jun 9, 2026",
-    icon: FileText,
-    color: "bg-tint text-deep",
-  },
-  {
-    title: "Case Summary",
-    category: "Overview",
-    description: "Attorney-ready narrative summarizing liability and injury findings.",
-    date: "Jun 9, 2026",
-    icon: Brain,
-    color: "bg-tint text-deep",
-  },
-  {
-    title: "Valuation Analysis",
-    category: "Damages",
-    description: "Full damage computation with multiplier scenarios.",
-    date: "Jun 9, 2026",
-    icon: BarChart2,
-    color: "bg-tint text-deep",
-  },
-];
+// The four deliverables — the same list their dedicated pages are built from.
+const deliverables = DELIVERABLES.map((d) => ({ ...d, color: "bg-tint text-deep" }));
 
-export function CaseReadyPage({ caseData, pipeline, onStageClick, onBackToIntake, onOpenWorkspace, onOpenInsurance, scrollToSection }: CaseReadyPageProps) {
+export function CaseReadyPage({ caseData, pipeline, onStageClick, onBackToIntake, onOpenWorkspace, onOpenInsurance, onOpenDeliverable, scrollToSection }: CaseReadyPageProps) {
   // Returning from a sub-page lands back on the deliverable it was opened from.
   useEffect(() => {
     if (!scrollToSection) return;
@@ -270,9 +240,9 @@ export function CaseReadyPage({ caseData, pipeline, onStageClick, onBackToIntake
             </div>
           </div>
 
-          {/* RIGHT (60%) — Generated Deliverables, with Insurance beneath it */}
+          {/* RIGHT (60%) — Generated Deliverables, Insurance among them */}
           <div className="col-span-3 space-y-6">
-          <div className="lg-card overflow-hidden">
+          <div id="generated-deliverables" className="lg-card overflow-hidden scroll-mt-[150px]">
             <div className="flex items-center justify-between px-6 py-4 border-b border-line">
               <h2 className="section-header">Generated Deliverables</h2>
               <span className="secondary-text">6 documents ready</span>
@@ -280,7 +250,14 @@ export function CaseReadyPage({ caseData, pipeline, onStageClick, onBackToIntake
 
             <div className="p-6 grid grid-cols-2 gap-4">
               {deliverables.map((item) => (
-                <div key={item.title} className="lg-card lg-card-i p-4 flex flex-col">
+                <div
+                  key={item.title}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => onOpenDeliverable?.(item.kind)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenDeliverable?.(item.kind); } }}
+                  className="lg-card lg-card-i p-4 flex flex-col cursor-pointer"
+                >
                   <div className="flex items-start justify-between mb-3">
                     <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium ${item.color}`}>
                       <item.icon className="w-3.5 h-3.5" strokeWidth={1.75} />
@@ -291,37 +268,40 @@ export function CaseReadyPage({ caseData, pipeline, onStageClick, onBackToIntake
                   <p className="secondary-text leading-relaxed flex-1">{item.description}</p>
                   <div className="flex items-center justify-between mt-4 pt-3 border-t border-line">
                     <span className="mono-ref">{item.date}</span>
-                    <button className="flex items-center gap-1 text-xs font-medium text-deep hover:text-ink transition-colors">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onOpenDeliverable?.(item.kind); }}
+                      className="flex items-center gap-1 text-xs font-medium text-deep hover:text-ink transition-colors"
+                    >
                       Open <ExternalLink className="w-3.5 h-3.5" strokeWidth={1.75} />
                     </button>
                   </div>
                 </div>
               ))}
-            </div>
-          </div>
 
-          {/* Insurance Policy Analysis — beneath Generated Deliverables, the same
-              deliverable card at the container's width, opening the insurance
-              analysis Stage 2 produced. */}
-          <div id="insurance-deliverable" className="lg-card lg-card-i p-6 flex flex-col scroll-mt-[150px]">
-            <div className="flex items-start justify-between mb-3">
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-tint text-deep">
-                <Shield className="w-3.5 h-3.5" strokeWidth={1.75} />
-                Insurance
+              {/* Insurance Policy Analysis — the fifth deliverable, one column
+                  wide beneath Case Summary, opening the insurance analysis
+                  Stage 2 produced. */}
+              <div id="insurance-deliverable" className="lg-card lg-card-i p-4 flex flex-col scroll-mt-[150px]">
+                <div className="flex items-start justify-between mb-3">
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-tint text-deep">
+                    <Shield className="w-3.5 h-3.5" strokeWidth={1.75} />
+                    Insurance
+                  </div>
+                </div>
+                <h3 className="card-title mb-1">{INSURANCE_ANALYSIS.title}</h3>
+                <p className="secondary-text leading-relaxed flex-1">
+                  Legal validity, coverage, limits, red flags, liens and insurer profile in one attorney-ready view.
+                </p>
+                <div className="flex items-center justify-between mt-4 pt-3 border-t border-line">
+                  <span className="mono-ref">{INSURANCE_ANALYSIS.analysedOn}</span>
+                  <button
+                    onClick={onOpenInsurance}
+                    className="flex items-center gap-1 text-xs font-medium text-deep hover:text-ink transition-colors"
+                  >
+                    Open <ExternalLink className="w-3.5 h-3.5" strokeWidth={1.75} />
+                  </button>
+                </div>
               </div>
-            </div>
-            <h3 className="card-title mb-1">{INSURANCE_ANALYSIS.title}</h3>
-            <p className="secondary-text leading-relaxed flex-1">
-              Legal validity, coverage, limits, red flags, liens and insurer profile in one attorney-ready view.
-            </p>
-            <div className="flex items-center justify-between mt-4 pt-3 border-t border-line">
-              <span className="mono-ref">{INSURANCE_ANALYSIS.analysedOn}</span>
-              <button
-                onClick={onOpenInsurance}
-                className="flex items-center gap-1 text-xs font-medium text-deep hover:text-ink transition-colors"
-              >
-                Open <ExternalLink className="w-3.5 h-3.5" strokeWidth={1.75} />
-              </button>
             </div>
           </div>
           </div>

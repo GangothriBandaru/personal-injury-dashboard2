@@ -3,15 +3,16 @@ import {
   FileText, Image as ImageIcon, Video, Search, SlidersHorizontal, ChevronDown, X, Sparkles,
   ShieldCheck, UserPlus, AlertTriangle, CheckCircle, Eye, Play, Pause, ZoomIn, ZoomOut,
   Scale, Activity, DollarSign, Gavel, Link2, Loader2, RotateCcw, ArrowRight, Users,
-  Layers, Clock,
+  Layers, Clock, AudioLines,
 } from "lucide-react";
 import type { CaseDocument, AnalysisFinding } from "../types/case";
 import {
   buildDocResolver, stageEvidence, STAGE_LABELS, type StageId, type ChronEvent, type UserChronology,
 } from "./WorkspaceTabs";
-import { DocumentWorkspaceModal } from "../components/DocumentWorkspace";
+import { DocumentWorkspaceModal, DocActions } from "../components/DocumentWorkspace";
+import { FileTypeBadge, FileTypeIcon, FileTypeTag, fileExtension } from "../components/fileType";
 import {
-  EVIDENCE_INTEL, EVIDENCE_MEDIA, bucketFor, formatFor, FORMAT_LABEL,
+  EVIDENCE_INTEL, EVIDENCE_MEDIA, bucketFor, formatFor,
   type EvidenceIntel, type EvidenceFormat, type Confidence,
 } from "./evidenceData";
 
@@ -83,17 +84,6 @@ function titleFromName(name: string) {
 }
 
 // ── Small shared pieces ───────────────────────────────────────────────────────
-
-const FORMAT_ICON: Record<EvidenceFormat, any> = { document: FileText, image: ImageIcon, video: Video };
-
-function FormatBadge({ format }: { format: EvidenceFormat }) {
-  const Icon = FORMAT_ICON[format];
-  return (
-    <span className="pill pill-neutral shrink-0">
-      <Icon className="w-3.5 h-3.5" strokeWidth={1.75} /> {FORMAT_LABEL[format]}
-    </span>
-  );
-}
 
 function OriginBadge({ item }: { item: EvidenceItem }) {
   if (item.userAdded) {
@@ -171,8 +161,9 @@ function ViewerShell({
       <div className="absolute inset-0 bg-ink/50" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-xl w-[90vw] h-[88vh] max-w-[1200px] flex flex-col overflow-hidden">
         <div className="flex items-center gap-2 px-4 py-2.5 bg-white border-b border-line shrink-0">
-          <FileText className="w-4 h-4 text-deep shrink-0" strokeWidth={1.75} />
+          <FileTypeIcon name={name} className="w-4 h-4 text-deep shrink-0" />
           <span className="mono-ref text-ink truncate">{name}</span>
+          <FileTypeTag name={name} />
           <span className="secondary-text truncate hidden sm:inline">· {bucket}</span>
           <div className="ml-auto flex items-center gap-1.5 shrink-0">
             {toolbar}
@@ -327,7 +318,7 @@ function AnalysisDrawer({
             <h2 className="card-title">{item.title}</h2>
             <div className="mono-ref mt-1 truncate">{item.name}</div>
             <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-              <FormatBadge format={item.format} />
+              <FileTypeBadge name={item.name} />
               <OriginBadge item={item} />
               <AnalysisBadge state={state} />
             </div>
@@ -619,17 +610,16 @@ function AnalysisDrawer({
 // ── Evidence card ─────────────────────────────────────────────────────────────
 
 function EvidenceCard({
-  item, state, onOpen, onAnalyze, onRun, onGoToStage,
+  item, state, onOpen, onAnalyze, onRun, onDownload, onGoToStage,
 }: {
   item: EvidenceItem;
   state: AnalysisState;
   onOpen: () => void;
   onAnalyze: () => void;
   onRun: () => void;
+  onDownload: () => void;
   onGoToStage: (s: StageId) => void;
 }) {
-  const openLabel = item.format === "image" ? "View Image" : item.format === "video" ? "Watch Video" : "Preview";
-  const OpenIcon = item.format === "video" ? Play : Eye;
   const supports = item.intel?.supports ?? item.citedBy;
 
   return (
@@ -640,7 +630,7 @@ function EvidenceCard({
           <div className="mono-ref mt-0.5 truncate">{item.name}</div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
-          <FormatBadge format={item.format} />
+          <FileTypeBadge name={item.name} />
           <OriginBadge item={item} />
           <AnalysisBadge state={state} />
         </div>
@@ -688,22 +678,25 @@ function EvidenceCard({
         </div>
       )}
 
-      <div className="mt-4 pt-4 border-t border-line flex items-center gap-2 flex-wrap">
-        <button onClick={onOpen} className="btn btn-secondary px-3 py-2 text-sm gap-1.5">
-          <OpenIcon className="w-4 h-4 text-deep" strokeWidth={1.75} /> {openLabel}
-        </button>
-        {state === "pending" || state === "failed" ? (
-          <button onClick={onRun} className="btn btn-primary px-3 py-2 text-sm gap-1.5">
-            <Sparkles className="w-4 h-4" strokeWidth={1.75} /> {state === "failed" ? "Retry Analysis" : "Run Analysis"}
+      {/* The common evidence actions — Preview / Insights / Download — on every
+          type; Preview opens the viewer for the file's own kind. */}
+      <div className="mt-4 pt-4 border-t border-line flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
+          {(state === "pending" || state === "failed") && (
+            <button onClick={onRun} className="btn btn-primary px-3 py-2 text-sm gap-1.5">
+              <Sparkles className="w-4 h-4" strokeWidth={1.75} /> {state === "failed" ? "Retry Analysis" : "Run Analysis"}
+            </button>
+          )}
+          <button onClick={onAnalyze} disabled={state === "analyzing" || state === "pending"} className="btn btn-secondary px-3 py-2 text-sm gap-1.5 disabled:opacity-50">
+            <Scale className="w-4 h-4 text-deep" strokeWidth={1.75} /> Case Impact
           </button>
-        ) : (
-          <button onClick={onAnalyze} disabled={state === "analyzing"} className="btn btn-secondary px-3 py-2 text-sm gap-1.5 disabled:opacity-50">
-            <Sparkles className="w-4 h-4 text-deep" strokeWidth={1.75} /> AI Analysis
-          </button>
-        )}
-        <button onClick={onAnalyze} disabled={state === "analyzing" || state === "pending"} className="btn btn-secondary px-3 py-2 text-sm gap-1.5 disabled:opacity-50">
-          <Scale className="w-4 h-4 text-deep" strokeWidth={1.75} /> Case Impact
-        </button>
+        </div>
+        <DocActions
+          size="sm"
+          onPreview={onOpen}
+          onInsights={state === "analyzing" ? undefined : onAnalyze}
+          onDownload={onDownload}
+        />
       </div>
     </div>
   );
@@ -719,7 +712,7 @@ interface Props {
 }
 
 const TYPE_FILTERS = ["All", "Medical", "Accident / Scene", "Police / Official", "Witness", "Insurance", "Financial", "Legal", "Vehicle / Physical", "Communications", "Other"];
-const FILE_FILTERS = ["All", "Documents", "PDF", "Images", "Videos", "Images & Videos"];
+const FILE_FILTERS = ["All", "Documents", "PDF", "Images", "Videos", "Images & Videos", "Audio"];
 const ANALYSIS_FILTERS = ["All", "Analyzed", "Needs Review", "Pending Analysis"];
 const STATUS_FILTERS = ["All", "Verified", "User Added", "System Generated"];
 const RELEVANCE_FILTERS = ["All", "Liability", "Causation", "Damages", "Violations", "Settlement", "Multiple"];
@@ -878,7 +871,7 @@ export function EvidenceStageTab({ documents, findings, userChronology, goTo }: 
 
   // ── Summary counts — derived, never hard-coded ──
   const counts = useMemo(() => {
-    const c = { total: items.length, document: 0, image: 0, video: 0, analyzed: 0, review: 0 };
+    const c = { total: items.length, document: 0, image: 0, video: 0, audio: 0, analyzed: 0, review: 0 };
     for (const i of items) {
       c[i.format]++;
       const s = stateOf(i);
@@ -919,7 +912,9 @@ export function EvidenceStageTab({ documents, findings, userChronology, goTo }: 
       if (fFile === "Images" && i.format !== "image") return false;
       if (fFile === "Videos" && i.format !== "video") return false;
       if (fFile === "Images & Videos" && i.format !== "image" && i.format !== "video") return false;
-      if ((fFile === "Documents" || fFile === "PDF") && i.format !== "document") return false;
+      if (fFile === "Audio" && i.format !== "audio") return false;
+      if (fFile === "Documents" && i.format !== "document") return false;
+      if (fFile === "PDF" && fileExtension(i.name) !== "pdf") return false;
     }
     if (fAnalysis !== "All") {
       const s = stateOf(i);
@@ -998,9 +993,11 @@ export function EvidenceStageTab({ documents, findings, userChronology, goTo }: 
     }, 60);
   };
 
+  // Images and video open in their viewers; documents and audio open in the
+  // Document Workspace, which previews each in the form its type needs.
   const openItem = (item: EvidenceItem) => {
-    if (item.format === "document") setPreviewDoc(item.doc);
-    else setViewer(item);
+    if (item.format === "image" || item.format === "video") setViewer(item);
+    else setPreviewDoc(item.doc);
   };
   const openByName = (name: string) => {
     const found = items.find((i) => i.key === name.toLowerCase());
@@ -1012,6 +1009,7 @@ export function EvidenceStageTab({ documents, findings, userChronology, goTo }: 
     { label: "Documents", value: counts.document, icon: FileText },
     { label: "Images", value: counts.image, icon: ImageIcon },
     { label: "Videos", value: counts.video, icon: Video },
+    ...(counts.audio > 0 ? [{ label: "Audio", value: counts.audio, icon: AudioLines }] : []),
     { label: "Analyzed", value: counts.analyzed, icon: Sparkles },
     { label: "Needs Review", value: counts.review, icon: AlertTriangle },
   ];
@@ -1216,7 +1214,7 @@ export function EvidenceStageTab({ documents, findings, userChronology, goTo }: 
                 {buckets.map((b) => {
                   const open = !!expanded[b.name];
                   const groups = ([
-                    ["Documents", "document"], ["Images", "image"], ["Videos", "video"],
+                    ["Documents", "document"], ["Images", "image"], ["Videos", "video"], ["Audio", "audio"],
                   ] as const)
                     .map(([label, fmt]) => ({ label, docs: b.docs.filter((d) => d.format === fmt) }))
                     .filter((g) => g.docs.length > 0);
@@ -1250,6 +1248,7 @@ export function EvidenceStageTab({ documents, findings, userChronology, goTo }: 
                                     onOpen={() => openItem(item)}
                                     onAnalyze={() => setAnalysisItem(item)}
                                     onRun={() => runAnalysis(item)}
+                                    onDownload={() => {}}
                                     onGoToStage={goTo}
                                   />
                                 ))}

@@ -15,6 +15,8 @@ import { InsuranceDetailPage } from "./pages/InsuranceDetailPage";
 import { ValuationPage } from "./pages/ValuationPage";
 import { CaseReadyPage } from "./pages/CaseReadyPage";
 import { CaseWorkspacePage } from "./pages/CaseWorkspacePage";
+import { DeliverablePage, type DeliverableKind } from "./pages/DeliverablePage";
+import { EMPTY_USER_CHRONOLOGY, type UserChronology } from "./workspace/WorkspaceTabs";
 import { NotesProvider } from "./notes/NotesContext";
 import { FloatingNotes } from "./components/FloatingNotes";
 import { AssistantProvider } from "./assistant/AssistantContext";
@@ -85,6 +87,27 @@ export default function App() {
   // stage they were opened from, and the one they return to.
   // (The Case Workspace shows the same pages as its own Insurance stage.)
   const [insuranceOrigin, setInsuranceOrigin] = useState<"analysis" | "case-ready">("analysis");
+  // The Case Ready deliverable open on its own page, and the workspace stage to
+  // land on when a deliverable links into one it does not show.
+  const [deliverable, setDeliverable] = useState<DeliverableKind>("chronology");
+  const [workspaceTab, setWorkspaceTab] = useState<string | undefined>(undefined);
+  // Chronology entries the attorney added by hand — held here so the Case
+  // Workspace's Chronology and the Medical Chronology deliverable share them.
+  const [userChronology, setUserChronology] = useState<UserChronology>(EMPTY_USER_CHRONOLOGY);
+  const openDeliverable = (kind: DeliverableKind) => {
+    setDeliverable(kind);
+    setActivePage("deliverable");
+    document.querySelector("main")?.scrollTo(0, 0);
+  };
+  const backToCaseReady = () => {
+    setReturnToSection("generated-deliverables");
+    setActivePage("case-ready");
+  };
+  const openWorkspace = (tab?: string) => {
+    setWorkspaceTab(tab);
+    setActivePage("workspace");
+    setSidebarCollapsed(true);
+  };
   const openInsurancePage = (page: "insurance" | "insurance-detail") => setActivePage(page);
   const openInsuranceFrom = (origin: "analysis" | "case-ready") => {
     setInsuranceOrigin(origin);
@@ -103,7 +126,7 @@ export default function App() {
     if (activePage !== "analysis" && activePage !== "case-ready") setReturnToSection(undefined);
     // The insurance pages are full pages, so each opens at the top of the
     // scrolling main area rather than wherever the previous page was left.
-    if (activePage === "insurance" || activePage === "insurance-detail") {
+    if (activePage === "insurance" || activePage === "insurance-detail" || activePage === "deliverable") {
       document.querySelector("main")?.scrollTo(0, 0);
     }
   }, [activePage]);
@@ -118,6 +141,7 @@ export default function App() {
 
   const handleOpenWorkflow = (caseData: any) => {
     setSelectedCase(caseData);
+    setUserChronology(EMPTY_USER_CHRONOLOGY);
     setPipeline(buildPipelineForCase(caseData));
     setActivePage("workflow");
     setSidebarCollapsed(true);
@@ -127,9 +151,9 @@ export default function App() {
   // fully-processed, review-ready case so every tab has populated content.
   const handleOpenWorkspace = (caseData: any) => {
     setSelectedCase(caseData);
+    setUserChronology(EMPTY_USER_CHRONOLOGY);
     setPipeline(buildPipelineForCase({ stage: "Ready For Review" }));
-    setActivePage("workspace");
-    setSidebarCollapsed(true);
+    openWorkspace();
   };
 
   // Navigating via the sidebar always returns to a top-level page, so expand it.
@@ -227,14 +251,37 @@ export default function App() {
             onPipelineUpdate={updatePipeline}
             onStageClick={handleStageNavigation}
             onBackToIntake={() => setActivePage("intake")}
-            onOpenWorkspace={() => { setActivePage("workspace"); setSidebarCollapsed(true); }}
+            onOpenWorkspace={() => openWorkspace()}
             onOpenInsurance={() => openInsuranceFrom("case-ready")}
+            onOpenDeliverable={openDeliverable}
             scrollToSection={returnToSection}
+          />
+        );
+      case "deliverable":
+        return (
+          <DeliverablePage
+            key={deliverable}
+            kind={deliverable}
+            caseData={selectedCase}
+            analysisFindings={analysisFindings}
+            documents={pipeline.documents}
+            userChronology={userChronology}
+            onUserChronologyChange={setUserChronology}
+            onBack={backToCaseReady}
+            onStageClick={handleStageNavigation}
+            onOpenDeliverable={openDeliverable}
+            onOpenWorkspaceTab={(tab) => openWorkspace(tab)}
+            onOpenValuation={() => setActivePage("valuation")}
+            onOpenInsurance={() => openInsuranceFrom("case-ready")}
           />
         );
       case "workspace":
         return (
           <CaseWorkspacePage
+            key={workspaceTab ?? "overview"}
+            initialTab={workspaceTab}
+            userChronology={userChronology}
+            onUserChronologyChange={setUserChronology}
             caseData={selectedCase}
             analysisFindings={analysisFindings}
             documents={pipeline.documents}
@@ -268,6 +315,7 @@ export default function App() {
     "insurance-detail": insuranceOrigin === "analysis" ? "Analysis" : "Case Ready",
     valuation: "Valuation",
     "case-ready": "Case Ready",
+    deliverable: "Case Ready",
     workspace: "Case Ready",
   };
   const currentStage = STAGE_BY_PAGE[activePage] ?? "";
@@ -275,7 +323,7 @@ export default function App() {
   // Human label for wherever the attorney currently is, for the assistant.
   const PAGE_LABEL: Record<string, string> = {
     intake: "Case Intake", workflow: "Case Intake", classification: "Classification",
-    analysis: "Analysis", valuation: "Valuation", "case-ready": "Case Ready",
+    analysis: "Analysis", valuation: "Valuation", "case-ready": "Case Ready", deliverable: "Case Ready",
     workspace: "Case Workspace", cases: "Case Workspace", clients: "Clients",
     communication: "Communication", demands: "Demand Letters", templates: "Templates",
   };

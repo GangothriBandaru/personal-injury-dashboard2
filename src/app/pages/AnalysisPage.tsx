@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { FileTypeIcon, FileTypeTag } from "../components/fileType";
 import { StageNavigator } from "../components/StageNavigator";
 import {
   ChevronLeft, ChevronRight, ChevronDown, CheckCircle, FileText, Eye, Download, X,
@@ -667,8 +668,9 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
                 <tr key={doc.id} className="lg-row transition-colors">
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2.5">
-                      <FileText className="w-4 h-4 text-[#5B6B78] shrink-0" strokeWidth={1.75} />
+                      <FileTypeIcon name={doc.name} className="w-4 h-4 text-[#5B6B78] shrink-0" />
                       <span className="mono-ref text-ink">{doc.name}</span>
+                      <FileTypeTag name={doc.name} />
                     </div>
                   </td>
                   <td className="px-6 py-4">
@@ -791,8 +793,9 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
                       {ev.evidence.map((file) => (
                         <div key={file} className="rounded-lg border border-line bg-wash p-3">
                           <div className="flex items-center gap-2 mb-2.5">
-                            <FileText className="w-4 h-4 text-[#5B6B78] shrink-0" strokeWidth={1.75} />
+                            <FileTypeIcon name={file} className="w-4 h-4 text-[#5B6B78] shrink-0" />
                             <span className="mono-ref text-ink truncate">{file}</span>
+                            <FileTypeTag name={file} />
                           </div>
                           <div className="flex items-center gap-1.5">
                             <button

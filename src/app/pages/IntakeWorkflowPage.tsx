@@ -1,4 +1,5 @@
 import React, { useState, useRef } from "react";
+import { FileTypeIcon, FileTypeTag } from "../components/fileType";
 import { StageNavigator } from "../components/StageNavigator";
 import { CaseSnapshot } from "../components/CaseSnapshot";
 import { Send, Upload, CheckCircle, Circle, ArrowRight, Check, X, FileText, Copy, Download, Eye, Search, ChevronLeft, ChevronDown, Mail, MessageSquare, AlertCircle, AlertTriangle, ListChecks, Bot, Pencil, RefreshCw, Plus, Clock, Info } from "lucide-react";
@@ -899,11 +900,11 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                         <div className="bg-white border border-line rounded-xl px-5 py-3.5 flex items-center justify-between gap-3">
                           <div className="flex items-center gap-3 min-w-0">
                             <div className="w-8 h-8 bg-tint border border-line rounded-lg flex items-center justify-center shrink-0">
-                              <FileText className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                              <FileTypeIcon name={docName} className="w-4 h-4 text-deep" />
                             </div>
                             <div className="min-w-0">
                               <div className="eyebrow mb-0.5">{signed ? "Signed Document" : "Sent Document"}</div>
-                              <div className="mono-ref text-ink">{docName}</div>
+                              <div className="mono-ref text-ink flex items-center gap-2">{docName}<FileTypeTag name={docName} /></div>
                             </div>
                           </div>
                           {signed && (
@@ -985,11 +986,11 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                                   <div className="bg-white border border-line rounded-xl px-5 py-3.5 flex items-center justify-between gap-3">
                                     <div className="flex items-center gap-3 min-w-0">
                                       <div className="w-8 h-8 bg-tint border border-line rounded-lg flex items-center justify-center shrink-0">
-                                        <FileText className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                                        <FileTypeIcon name={docName} className="w-4 h-4 text-deep" />
                                       </div>
                                       <div className="min-w-0">
                                         <div className="eyebrow mb-0.5">{signed ? "Signed Document" : "Sent Document"}</div>
-                                        <div className="mono-ref text-ink">{docName}</div>
+                                        <div className="mono-ref text-ink flex items-center gap-2">{docName}<FileTypeTag name={docName} /></div>
                                       </div>
                                     </div>
                                     {signed && (
@@ -1438,7 +1439,13 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                                 onClick={() => handlePreviewDocument(doc)}
                                 className="cursor-pointer hover:bg-wash"
                               >
-                                <td className="py-3 px-4 mono-ref text-ink">{doc.name}</td>
+                                <td className="py-3 px-4 mono-ref text-ink">
+                                  <span className="inline-flex items-center gap-2">
+                                    <FileTypeIcon name={doc.name} />
+                                    {doc.name}
+                                    <FileTypeTag name={doc.name} />
+                                  </span>
+                                </td>
                                 <td className="py-3 px-4">
                                   <span
                                     className={`pill ${
@@ -1524,6 +1531,7 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                                     <thead className="bg-white border-b border-line">
                                       <tr>
                                         <th className="text-left px-5 py-2.5 eyebrow">File Name</th>
+                                        <th className="text-left px-5 py-2.5 eyebrow">Type</th>
                                         <th className="text-left px-5 py-2.5 eyebrow">Source</th>
                                         <th className="text-left px-5 py-2.5 eyebrow">Date</th>
                                         <th className="text-right px-5 py-2.5 eyebrow">Actions</th>
@@ -1536,7 +1544,13 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                                             key={doc.id}
                                             className="transition-all hover:bg-wash"
                                           >
-                                            <td className="px-5 py-3 mono-ref text-ink">{doc.name}</td>
+                                            <td className="px-5 py-3 mono-ref text-ink">
+                                              <span className="inline-flex items-center gap-2">
+                                                <FileTypeIcon name={doc.name} />
+                                                {doc.name}
+                                              </span>
+                                            </td>
+                                            <td className="px-5 py-3"><FileTypeTag name={doc.name} /></td>
                                             <td className="px-5 py-3 text-sm text-[#5B6B78]">{doc.source}</td>
                                             <td className="px-5 py-3 text-sm text-[#5B6B78]">{doc.date}</td>
                                             <td className="px-5 py-3 text-right">
@@ -1852,8 +1866,9 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                     {submittedDocs.map((doc) => (
                       <div key={doc} className="flex items-center justify-between px-4 py-3">
                         <div className="flex items-center gap-2.5">
-                          <FileText className="w-4 h-4 text-[#5B6B78] shrink-0" strokeWidth={1.75} />
+                          <FileTypeIcon name={doc} className="w-4 h-4 text-[#5B6B78] shrink-0" />
                           <span className="mono-ref text-ink">{doc}</span>
+                          <FileTypeTag name={doc} />
                         </div>
                         <CheckCircle className="w-4 h-4 text-green-500 shrink-0" strokeWidth={1.75} />
                       </div>

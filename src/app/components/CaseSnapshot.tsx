@@ -1,3 +1,5 @@
+import { CaseDescription } from "./CaseDescription";
+
 interface CaseSnapshotProps {
   caseName: string;
   caseType?: string;
@@ -41,7 +43,7 @@ export function CaseSnapshot({
         <div className="shrink-0">
           <h2 className="section-header">{caseName}</h2>
         </div>
-        <p className="secondary-text leading-relaxed flex-1 min-w-0 text-right">{summary}</p>
+        <CaseDescription text={summary} />
       </div>
 
       {/* Metadata strip */}

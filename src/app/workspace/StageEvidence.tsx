@@ -3,6 +3,7 @@ import { ChevronDown, ArrowRight, ArrowDown, ArrowUp, FileText, X } from "lucide
 import type { CaseDocument } from "../types/case";
 import { classifyDocuments } from "../types/case";
 import { DocActions } from "../components/DocumentWorkspace";
+import { FileTypeIcon, FileTypeTag } from "../components/fileType";
 
 // ── Stage Evidence ────────────────────────────────────────────────────────────
 // Closes every Case Workspace stage with the documents supporting THAT stage —
@@ -48,6 +49,7 @@ function CategoryBlock({
               <thead className="bg-white border-b border-line">
                 <tr>
                   <th className="text-left px-5 py-2.5 eyebrow">File Name</th>
+                  <th className="text-left px-3 lg:px-5 py-2.5 eyebrow">Type</th>
                   <th className="text-left px-3 lg:px-5 py-2.5 eyebrow">Source</th>
                   <th className="text-left px-3 lg:px-5 py-2.5 eyebrow">Date</th>
                   <th className="text-right px-5 py-2.5 eyebrow">Actions</th>
@@ -56,7 +58,13 @@ function CategoryBlock({
               <tbody className="divide-y divide-line bg-white">
                 {docs.map((doc) => (
                   <tr key={doc.id} className="transition-all hover:bg-wash">
-                    <td className="px-5 py-3 mono-ref text-ink">{doc.name}</td>
+                    <td className="px-5 py-3 mono-ref text-ink">
+                      <span className="inline-flex items-center gap-2">
+                        <FileTypeIcon name={doc.name} />
+                        {doc.name}
+                      </span>
+                    </td>
+                    <td className="px-3 lg:px-5 py-3"><FileTypeTag name={doc.name} /></td>
                     <td className="px-3 lg:px-5 py-3 text-sm text-[#5B6B78] whitespace-nowrap">{doc.source}</td>
                     <td className="px-3 lg:px-5 py-3 text-sm text-[#5B6B78] whitespace-nowrap">{doc.date}</td>
                     <td className="px-5 py-3 text-right">
@@ -90,10 +98,13 @@ function DocumentCard({ doc, onPreview, onInsights, onDownload }: { doc: CaseDoc
   return (
     <div className="px-5 py-3.5">
       <div className="flex items-start gap-2.5">
-        <FileText className="w-4 h-4 text-deep shrink-0 mt-0.5" strokeWidth={1.75} />
+        <FileTypeIcon name={doc.name} className="w-4 h-4 text-deep shrink-0 mt-0.5" />
         <div className="min-w-0 flex-1">
           <div className="mono-ref text-ink break-all">{doc.name}</div>
-          <div className="text-sm text-[#5B6B78] mt-0.5">{doc.source} · {doc.date}</div>
+          <div className="text-sm text-[#5B6B78] mt-0.5 flex items-center gap-2 flex-wrap">
+            <FileTypeTag name={doc.name} />
+            <span>{doc.source} · {doc.date}</span>
+          </div>
         </div>
       </div>
       <div className="mt-2.5">

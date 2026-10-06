@@ -1,4 +1,5 @@
 import type { StageId } from "./WorkspaceTabs";
+import { fileKind, type FileKind } from "../components/fileType";
 
 // ── Evidence intelligence ─────────────────────────────────────────────────────
 // The Evidence stage does not own files. It reads the case's ONE document
@@ -6,7 +7,7 @@ import type { StageId } from "./WorkspaceTabs";
 // on top. Everything here is keyed by lowercased filename, so a document cited
 // by Chronology, Negligence and Violations stays a single underlying record.
 
-export type EvidenceFormat = "document" | "image" | "video";
+export type EvidenceFormat = FileKind;
 export type Confidence = "High" | "Moderate" | "Low";
 
 export interface EvidenceViolation {
@@ -50,7 +51,7 @@ export interface EvidenceIntel {
   keywords?: string[];              // extra search terms not present in the filename
   observations?: string[];          // images: what is actually visible
   inferences?: string[];            // images: what it may suggest
-  moments?: { time: string; text: string }[]; // videos: important moments
+  moments?: { time: string; text: string }[]; // videos / audio: important moments
 }
 
 // Case-referenced media. These are not uploads — they are referenced the same
@@ -85,17 +86,17 @@ export function bucketFor(name: string): string {
   return EVIDENCE_BUCKETS.find((b) => b.match.test(n))!.name;
 }
 
+// The media / document type comes from the one shared reading of a file's
+// type, so the Evidence workspace and every other evidence surface agree.
 export function formatFor(name: string): EvidenceFormat {
-  const n = name.toLowerCase();
-  if (/\.(jpg|jpeg|png|gif|webp|heic)$/.test(n)) return "image";
-  if (/\.(mp4|mov|avi|webm|mkv)$/.test(n)) return "video";
-  return "document";
+  return fileKind(name);
 }
 
 export const FORMAT_LABEL: Record<EvidenceFormat, string> = {
-  document: "PDF",
+  document: "DOCUMENT",
   image: "IMAGE",
   video: "VIDEO",
+  audio: "AUDIO",
 };
 
 // ── Authored analysis ─────────────────────────────────────────────────────────
