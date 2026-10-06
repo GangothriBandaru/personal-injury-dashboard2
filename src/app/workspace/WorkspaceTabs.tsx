@@ -7,7 +7,7 @@ import {
   HeartPulse, ClipboardList, Image as ImageIcon, Video, FileSignature, Quote,
   Pencil, RotateCcw, History, TrendingUp, TrendingDown, Info, Shield, Circle, Loader2, Bot, Send,
   Plus, UserPlus, Receipt, Trash2, Check,
-  ArrowUpRight, ArrowDown, Link2, Briefcase, Home, Wallet, Car,
+  ArrowUpRight, ArrowDown, Briefcase, Home, Wallet, Car,
 } from "lucide-react";
 import type { AnalysisFinding, CaseDocument } from "../types/case";
 import { classifyDocuments } from "../types/case";
@@ -1308,23 +1308,14 @@ const CONDITION_RELATION_LABEL: Record<ConditionRelation, string> = {
   unchanged: "Unchanged",
 };
 
-// What each relationship means, in the attorney's words.
+// What each relationship means, in the attorney's words — the line a card
+// shows under RELATIONSHIP.
 const CONDITION_RELATION_MEANING: Record<ConditionRelation, string> = {
-  new: "New condition after incident",
-  aggravated: "Pre-existing condition worsened after incident",
-  worsened: "Existing condition became more severe",
-  related: "Post-incident condition related to pre-existing condition",
+  new: "New injury",
+  aggravated: "Aggravated pre-existing condition",
+  worsened: "Worsened pre-existing condition",
+  related: "Related to pre-existing condition",
   unchanged: "Pre-existing condition continued without documented material change",
-};
-
-// The label on the line drawn from a pre-incident condition to its
-// post-incident one.
-const CONDITION_RELATION_CONNECTOR: Record<ConditionRelation, string> = {
-  new: "New after incident",
-  aggravated: "Aggravated by incident",
-  worsened: "Worsened after incident",
-  related: "Related — aggravation not established",
-  unchanged: "Continued without documented change",
 };
 
 // What a relationship rests on. A documented fact, a relationship the medical
@@ -1463,11 +1454,18 @@ function InjurySignalCard({
       {/* Relationship across the incident */}
       {!pre && (
         signal.relationship ? (
-          <div className="mt-3 rounded-lg bg-tint border border-[#D6F2F7] p-3 space-y-1">
+          // Shown on the card itself, not only in Details: what the relationship
+          // is, which pre-existing condition it concerns, and what changed.
+          <div className="mt-3 rounded-lg bg-tint border border-[#D6F2F7] p-3 space-y-1.5">
             <div className="eyebrow">Relationship</div>
-            <p className="text-sm font-medium text-ink">{CONDITION_RELATION_MEANING[signal.relationship]}</p>
-            {signal.relatedCondition && (
-              <p className="secondary-text">Pre-existing condition: <span className="font-medium text-ink">{signal.relatedCondition}</span></p>
+            <p className="text-sm font-semibold text-ink">{CONDITION_RELATION_MEANING[signal.relationship]}</p>
+            {signal.relatedCondition ? (
+              <p className="secondary-text">Pre-existing: <span className="font-medium text-ink">{signal.relatedCondition}</span></p>
+            ) : signal.relationship === "new" ? (
+              <p className="secondary-text">No pre-existing related condition identified.</p>
+            ) : null}
+            {signal.changeAfterIncident && (
+              <p className="secondary-text">Incident-related change: <span className="font-medium text-ink">{signal.changeAfterIncident}</span></p>
             )}
             {signal.relationshipBasis && <p className="text-xs text-[#5B6B78]">{CONDITION_BASIS_LABEL[signal.relationshipBasis]}</p>}
           </div>
@@ -1531,41 +1529,26 @@ function InjurySignalCard({
 
       {/* Preview & Insights — as on the Analysis stage's signal cards — and the
           before/after detail */}
-      <div className="mt-auto pt-4 flex items-center gap-2">
+      <div className="mt-auto pt-4 flex flex-wrap items-center gap-2">
         <button
           onClick={onPreview}
-          className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-line text-ink rounded-lg text-sm font-medium hover:bg-wash transition-colors"
+          className="flex-1 min-w-[96px] flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-line text-ink rounded-lg text-sm font-medium hover:bg-wash transition-colors"
         >
           <Eye className="w-4 h-4" strokeWidth={1.75} /> Preview
         </button>
         <button
           onClick={onInsights}
-          className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-line text-deep rounded-lg text-sm font-medium hover:bg-tint transition-colors"
+          className="flex-1 min-w-[96px] flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-line text-deep rounded-lg text-sm font-medium hover:bg-tint transition-colors"
         >
           <Sparkles className="w-4 h-4" strokeWidth={1.75} /> Insights
         </button>
         <button
           onClick={onDetails}
-          className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-line text-deep rounded-lg text-sm font-medium hover:bg-tint transition-colors"
+          className="flex-1 min-w-[96px] flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-line text-deep rounded-lg text-sm font-medium hover:bg-tint transition-colors"
         >
           Details <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
         </button>
       </div>
-    </div>
-  );
-}
-
-// The line drawn from a pre-incident condition to the post-incident one the
-// record relates to it, labelled with the relationship.
-function ConditionConnector({ relation }: { relation?: ConditionRelation }) {
-  return (
-    <div className="flex flex-col items-center py-1.5" aria-hidden="true">
-      <div className="w-px h-4 bg-soft" />
-      <span className="rounded-full bg-tint border border-[#D6F2F7] px-3 py-1 text-xs font-semibold text-deep">
-        {relation ? CONDITION_RELATION_CONNECTOR[relation] : RELATIONSHIP_NOT_ESTABLISHED}
-      </span>
-      <div className="w-px h-4 bg-soft" />
-      <ArrowDown className="w-4 h-4 text-deep -mt-1" strokeWidth={1.75} />
     </div>
   );
 }
@@ -1659,29 +1642,76 @@ function ConditionDetailDrawer({
   );
 }
 
-// Every pre-incident condition beside what became of it after the incident.
-function ConditionCompareDrawer({ rows, onClose }: { rows: { pre: AnalysisFinding; post?: AnalysisFinding }[]; onClose: () => void }) {
+// Pre-incident condition → incident / change → post-incident condition, for
+// every pre-incident condition on record, then the post-incident conditions
+// the record links to none of them.
+function ConditionCompareDrawer({
+  rows, unlinkedPost, onClose,
+}: { rows: { pre: AnalysisFinding; post?: AnalysisFinding }[]; unlinkedPost: AnalysisFinding[]; onClose: () => void }) {
   const fields: { label: string; get: (s: AnalysisFinding) => string | undefined }[] = [
-    { label: "Condition", get: (s) => s.title },
     { label: "Body Part", get: (s) => s.bodyPart },
     { label: "Severity", get: (s) => s.severity },
     { label: "Symptoms", get: (s) => s.symptoms },
     { label: "Treatment", get: (s) => s.treatment },
     { label: "Functional Impact", get: (s) => s.functionalImpact },
   ];
+  const step = (label: string, s?: AnalysisFinding, empty?: string) => (
+    <div className="rounded-xl border border-line bg-offwhite p-3">
+      <div className="eyebrow mb-1">{label}</div>
+      {s ? (
+        <>
+          <div className="text-sm font-semibold text-ink leading-snug">{s.title}</div>
+          <div className="text-xs text-[#5B6B78] mt-0.5">Severity: {s.severity ?? "Not assessed"}</div>
+        </>
+      ) : <div className="text-sm text-[#8A98A3]">{empty}</div>}
+    </div>
+  );
   return (
     <ConditionDrawer eyebrow="Medical Conditions" title="Compare Pre & Post-Incident" onClose={onClose}>
-      {rows.length === 0 ? (
+      {rows.length === 0 && (
         <div className="rounded-xl border border-dashed border-line bg-white p-5 secondary-text">
-          No pre-incident condition is documented in the case record, so there is nothing to compare yet.
-          Post-incident conditions are listed under Medical Conditions.
+          No pre-incident condition is documented in the case record, so there is nothing to compare across the
+          incident yet.
         </div>
-      ) : rows.map(({ pre, post }) => {
+      )}
+
+      {rows.map(({ pre, post }) => {
         const relation = post?.relationship ?? (pre.relationship === "unchanged" ? "unchanged" : undefined);
         const basis = post?.relationshipBasis ?? pre.relationshipBasis;
         return (
           <section key={pre.title} className="rounded-xl border border-line bg-white p-4">
-            <div className="grid grid-cols-2 gap-x-4">
+            {/* Before → incident / change → after */}
+            {step("Pre-Incident Condition", pre)}
+            <div className="flex flex-col items-center py-1.5">
+              <div className="w-px h-3 bg-soft" />
+              <div className="rounded-lg bg-tint border border-[#D6F2F7] px-3 py-2 text-center max-w-full">
+                <div className="eyebrow text-deep">Incident / Change</div>
+                <div className="text-sm text-ink mt-0.5">
+                  {post?.changeAfterIncident ?? <span className="text-[#8A98A3]">Change not described in the record</span>}
+                </div>
+              </div>
+              <div className="w-px h-3 bg-soft" />
+              <ArrowDown className="w-4 h-4 text-deep -mt-1" strokeWidth={1.75} />
+            </div>
+            {step(
+              "Post-Incident Condition",
+              post,
+              relation === "unchanged" ? CONDITION_RELATION_MEANING.unchanged : "No post-incident condition is linked to it",
+            )}
+
+            <div className="mt-3 rounded-lg bg-tint border border-[#D6F2F7] p-3 flex items-center gap-2 flex-wrap">
+              <span className="eyebrow">Relationship</span>
+              {relation ? (
+                <>
+                  <ConditionRelationTag relation={relation} />
+                  <span className="text-sm font-medium text-ink">{CONDITION_RELATION_MEANING[relation]}</span>
+                  {basis && <span className="text-xs text-[#5B6B78]">({CONDITION_BASIS_LABEL[basis]})</span>}
+                </>
+              ) : <span className="text-sm text-[#8A98A3]">{RELATIONSHIP_NOT_ESTABLISHED}</span>}
+            </div>
+
+            {/* Side by side, field by field */}
+            <div className="grid grid-cols-2 gap-x-4 mt-3">
               <div className="eyebrow pb-2 border-b border-line">Pre-Incident</div>
               <div className="eyebrow pb-2 border-b border-line">Post-Incident</div>
               {fields.map((f) => (
@@ -1697,29 +1727,37 @@ function ConditionCompareDrawer({ rows, onClose }: { rows: { pre: AnalysisFindin
                 </div>
               ))}
             </div>
-            <div className="mt-3 rounded-lg bg-tint border border-[#D6F2F7] p-3 flex items-center gap-2 flex-wrap">
-              <span className="eyebrow">Relationship</span>
-              {relation ? (
-                <>
-                  <ConditionRelationTag relation={relation} />
-                  <span className="text-sm text-ink">{CONDITION_RELATION_CONNECTOR[relation]}</span>
-                  {basis && <span className="text-xs text-[#5B6B78]">({CONDITION_BASIS_LABEL[basis]})</span>}
-                </>
-              ) : <span className="text-sm text-[#8A98A3]">{RELATIONSHIP_NOT_ESTABLISHED}</span>}
-            </div>
             <div className="mt-3">
               <div className="eyebrow mb-1.5">Supporting Evidence</div>
-              <p className="secondary-text">{[pre, post].filter(Boolean).flatMap((s) => s!.evidence.map((e) => e.file)).join(" · ") || "No supporting documents on file."}</p>
+              <p className="secondary-text">{Array.from(new Set([pre, post].filter(Boolean).flatMap((s) => s!.evidence.map((e) => e.file)))).join(" · ") || "No supporting documents on file."}</p>
             </div>
           </section>
         );
       })}
+
+      {/* Post-incident conditions with no pre-incident condition linked: a new
+          injury where the record says so, otherwise not established. */}
+      {unlinkedPost.length > 0 && (
+        <section className="rounded-xl border border-line bg-white p-4">
+          <div className="eyebrow mb-1">Post-Incident Conditions With No Linked Pre-Incident Condition</div>
+          <div className="divide-y divide-line">
+            {unlinkedPost.map((p) => (
+              <div key={p.title} className="py-2.5 flex items-center justify-between gap-3 flex-wrap">
+                <span className="text-sm font-medium text-ink">{p.title}</span>
+                {p.relationship
+                  ? <span className="flex items-center gap-2"><ConditionRelationTag relation={p.relationship} /><span className="text-xs text-[#5B6B78]">{CONDITION_RELATION_MEANING[p.relationship]}</span></span>
+                  : <span className="text-xs text-[#8A98A3]">{RELATIONSHIP_NOT_ESTABLISHED}</span>}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </ConditionDrawer>
   );
 }
 
 export function MedicalTimelineTab({
-  documents, goTo, findings = [], userChronology = EMPTY_USER_CHRONOLOGY, onAddChronology,
+  model, documents, goTo, findings = [], userChronology = EMPTY_USER_CHRONOLOGY, onAddChronology,
 }: TabProps & { userChronology?: UserChronology; onAddChronology?: (kind: "medical" | "event", ev: ChronEvent) => void }) {
   // Medical and Event Chronology answer "what happened and when"; Medical
   // Conditions answers what the plaintiff's condition was before and after.
@@ -1830,15 +1868,25 @@ export function MedicalTimelineTab({
     .map((post) => ({ pre: allPre.find((p) => p.title === post.relatedCondition), post }))
     .filter((x): x is ConditionPair => !!x.pre);
   const pairOf = (s: AnalysisFinding) => conditionPairs.find((p) => p.pre === s || p.post === s);
-  // Shown together, a pair is not repeated in the period lists. Filtering by a
-  // period lists every condition of that period, each carrying its link.
-  const shownPairs = timingView ? [] : conditionPairs.filter(({ post }) => matchesCondition(post) && matchesRelation(post));
-  const inShownPair = (s: AnalysisFinding) => shownPairs.some((p) => p.pre === s || p.post === s);
-  const shownSignals = injurySignals.filter((s) => matchesCondition(s) && matchesRelation(s) && !inShownPair(s));
+  // Each condition stays in its own period's list; a linked pair is joined by
+  // what the two cards say about each other. A relationship filter keeps the
+  // pre-incident half of a matching pair in view, since the relationship is
+  // recorded on the post-incident half.
+  const matchesFilters = (s: AnalysisFinding) => matchesCondition(s) && matchesRelation(s);
+  const shownSignals = injurySignals.filter(
+    (s) => matchesFilters(s) || (narrowed && !timingView && conditionPairs.some((p) => p.pre === s && matchesFilters(p.post))),
+  );
   const preSignals = shownSignals.filter((s) => s.timing === "pre-incident");
   const postSignals = shownSignals.filter((s) => s.timing === "post-incident");
   const untimedSignals = shownSignals.filter((s) => !s.timing);
-  const visibleConditions = shownPairs.length + shownSignals.length;
+  const visibleConditions = shownSignals.length;
+  // Each section previews three conditions, as the Analysis stage's Injury
+  // Signals do, and expands on its own.
+  const CONDITION_PREVIEW = 3;
+  const [preExpanded, setPreExpanded] = useState(false);
+  const [postExpanded, setPostExpanded] = useState(false);
+  // Post-incident conditions the record links to no pre-incident one.
+  const unlinkedPost = allPost.filter((p) => !conditionPairs.some((x) => x.post === p));
   // Conditions on the other side of the incident naming the same body part,
   // with no relationship recorded between them — flagged, never classified.
   const bodyPartMatches = (s: AnalysisFinding) => {
@@ -2035,14 +2083,14 @@ export function MedicalTimelineTab({
       )}
       </div>
 
-      {/* Medical Conditions — BEFORE → INCIDENT → AFTER: what existed before,
-          what was documented after, and how the record relates the two */}
+      {/* Medical Conditions — what existed before the incident, what was
+          documented after it, and how the record relates the two */}
       {subTab === "conditions" && (
-        <div className="space-y-8">
+        <div className="space-y-8 @container">
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <p className="secondary-text max-w-2xl">
-              The case&apos;s Injury Signals across the incident. A pre-existing condition the record links to a
-              post-incident one is shown with it; severity and relationship appear only where the record assesses them.
+              The case&apos;s Injury Signals across the incident. Where the record links a post-incident condition to a
+              pre-existing one, its card says so; severity and relationship appear only where the record assesses them.
             </p>
             <button
               onClick={() => setCompareOpen(true)}
@@ -2058,105 +2106,74 @@ export function MedicalTimelineTab({
             <div className="text-center py-16 secondary-text">No conditions match the current filters.</div>
           ) : (
             <>
-              {/* Pre-existing conditions the record links across the incident */}
-              {shownPairs.length > 0 && (
-                <section className="space-y-4">
-                  <div className="flex items-center gap-2.5 pb-3 border-b border-line">
-                    <div className="w-8 h-8 rounded-lg bg-tint flex items-center justify-center shrink-0">
-                      <Link2 className="w-4 h-4 text-deep" strokeWidth={1.75} />
+              {([
+                {
+                  key: "pre", title: "Pre-Incident Medical Conditions", icon: History, list: preSignals,
+                  show: condTiming === "all" || condTiming === "pre-incident" || preSignals.length > 0,
+                  expanded: preExpanded, setExpanded: setPreExpanded,
+                  empty: narrowed && !timingView
+                    ? "No pre-incident conditions match the current filters."
+                    : "No pre-incident conditions are documented in the case record.",
+                },
+                {
+                  key: "post", title: "Post-Incident Medical Conditions", icon: Activity, list: postSignals,
+                  show: condTiming === "all" || condTiming === "post-incident" || postSignals.length > 0,
+                  expanded: postExpanded, setExpanded: setPostExpanded,
+                  empty: narrowed
+                    ? "No post-incident conditions match the current filters."
+                    : "No post-incident conditions are documented in the case record.",
+                },
+              ] as const).filter((sec) => sec.show).map((sec) => {
+                const visible = sec.expanded ? sec.list : sec.list.slice(0, CONDITION_PREVIEW);
+                const remaining = sec.list.length - CONDITION_PREVIEW;
+                return (
+                  <section key={sec.key} className="space-y-4">
+                    <div className="flex items-center gap-2.5 pb-3 border-b border-line">
+                      <div className="w-8 h-8 rounded-lg bg-tint flex items-center justify-center shrink-0">
+                        <sec.icon className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                      </div>
+                      <h3 className="card-title flex-1">{sec.title}</h3>
+                      <span className="text-xs font-semibold text-deep bg-tint border border-[#D6F2F7] rounded-full px-2 py-0.5 tabular-nums">{sec.list.length}</span>
                     </div>
-                    <h3 className="card-title flex-1">Pre-existing Conditions Affected by the Incident</h3>
-                    <span className="text-xs font-semibold text-deep bg-tint border border-[#D6F2F7] rounded-full px-2 py-0.5 tabular-nums">{shownPairs.length}</span>
-                  </div>
-                  {shownPairs.map(({ pre, post }) => (
-                    <div key={`${pre.title}->${post.title}`} className="rounded-xl border border-line bg-offwhite p-4">
-                      <InjurySignalCard
-                        signal={pre}
-                        linkedPost={[post]}
-                        onPreview={() => openSignalEvidence(pre)}
-                        onInsights={() => openSignalEvidence(pre, "insights")}
-                        onDetails={() => setDetailSignal(pre)}
-                      />
-                      <ConditionConnector relation={post.relationship} />
-                      <InjurySignalCard
-                        signal={post}
-                        onPreview={() => openSignalEvidence(post)}
-                        onInsights={() => openSignalEvidence(post, "insights")}
-                        onDetails={() => setDetailSignal(post)}
-                      />
-                    </div>
-                  ))}
-                </section>
-              )}
-
-              {(condTiming === "all" || condTiming === "pre-incident" || preSignals.length > 0) && (
-                <section className="space-y-4">
-                  <div className="flex items-center gap-2.5 pb-3 border-b border-line">
-                    <div className="w-8 h-8 rounded-lg bg-tint flex items-center justify-center shrink-0">
-                      <History className="w-4 h-4 text-deep" strokeWidth={1.75} />
-                    </div>
-                    <h3 className="card-title flex-1">Pre-Incident Medical Conditions</h3>
-                    <span className="text-xs font-semibold text-deep bg-tint border border-[#D6F2F7] rounded-full px-2 py-0.5 tabular-nums">{preSignals.length}</span>
-                  </div>
-                  {preSignals.length > 0 ? (
-                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                      {preSignals.map((s) => (
-                        <InjurySignalCard
-                          key={s.title}
-                          signal={s}
-                          linkedPost={conditionPairs.filter((p) => p.pre === s).map((p) => p.post)}
-                          bodyPartMatches={bodyPartMatches(s)}
-                          onPreview={() => openSignalEvidence(s)}
-                          onInsights={() => openSignalEvidence(s, "insights")}
-                          onDetails={() => setDetailSignal(s)}
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="rounded-xl border border-dashed border-line bg-white p-5 secondary-text">
-                      {shownPairs.length > 0
-                        ? "Every pre-incident condition is shown above with the post-incident condition it is linked to."
-                        : "No pre-incident conditions are documented in the case record."}
-                    </div>
-                  )}
-                </section>
-              )}
-
-              {(condTiming === "all" || condTiming === "post-incident" || postSignals.length > 0) && (
-                <section className="space-y-4">
-                  <div className="flex items-center gap-2.5 pb-3 border-b border-line">
-                    <div className="w-8 h-8 rounded-lg bg-tint flex items-center justify-center shrink-0">
-                      <Activity className="w-4 h-4 text-deep" strokeWidth={1.75} />
-                    </div>
-                    <h3 className="card-title flex-1">Post-Incident Medical Conditions</h3>
-                    <span className="text-xs font-semibold text-deep bg-tint border border-[#D6F2F7] rounded-full px-2 py-0.5 tabular-nums">{postSignals.length}</span>
-                  </div>
-                  {postSignals.length > 0 ? (
-                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                      {postSignals.map((s) => (
-                        <InjurySignalCard
-                          key={s.title}
-                          signal={s}
-                          bodyPartMatches={bodyPartMatches(s)}
-                          onPreview={() => openSignalEvidence(s)}
-                          onInsights={() => openSignalEvidence(s, "insights")}
-                          onDetails={() => setDetailSignal(s)}
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="rounded-xl border border-dashed border-line bg-white p-5 secondary-text">
-                      No post-incident conditions match the current filters.
-                    </div>
-                  )}
-                </section>
-              )}
+                    {sec.list.length > 0 ? (
+                      <>
+                        <div className="grid grid-cols-1 @xl:grid-cols-2 @3xl:grid-cols-3 gap-4">
+                          {visible.map((s) => (
+                            <InjurySignalCard
+                              key={s.title}
+                              signal={s}
+                              linkedPost={conditionPairs.filter((p) => p.pre === s).map((p) => p.post)}
+                              bodyPartMatches={bodyPartMatches(s)}
+                              onPreview={() => openSignalEvidence(s)}
+                              onInsights={() => openSignalEvidence(s, "insights")}
+                              onDetails={() => setDetailSignal(s)}
+                            />
+                          ))}
+                        </div>
+                        {/* Three at a time, as on the Analysis stage */}
+                        {remaining > 0 && (
+                          <div className="flex justify-center">
+                            <button onClick={() => sec.setExpanded(!sec.expanded)} className="btn btn-secondary gap-2">
+                              {sec.expanded
+                                ? "Show Fewer Findings"
+                                : `View ${remaining} More ${remaining === 1 ? "Finding" : "Findings"}`}
+                              <ArrowRight className={`w-4 h-4 transition-transform ${sec.expanded ? "-rotate-90" : ""}`} strokeWidth={1.75} />
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="rounded-xl border border-dashed border-line bg-white p-5 secondary-text">{sec.empty}</div>
+                    )}
+                  </section>
+                );
+              })}
 
               {/* Signals the record does not place before or after the incident */}
               {untimedSignals.length > 0 && (
                 <section className="space-y-4">
                   <h3 className="card-title pb-3 border-b border-line">Timing Not Established</h3>
-                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 @xl:grid-cols-2 @3xl:grid-cols-3 gap-4">
                     {untimedSignals.map((s) => (
                       <InjurySignalCard
                         key={s.title}
@@ -2333,7 +2350,8 @@ export function MedicalTimelineTab({
       <div className="min-w-0 order-1 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain">
       <div className="space-y-6">
 
-        <PractitionerSnapshotCard />
+        {/* The practitioners of the case that is open */}
+        <PractitionerSnapshotCard key={model.caseId} caseRef={model.caseId} />
 
         {/* Filters — date filter + event-type filter */}
         <div className="rounded-2xl border border-line bg-white p-5 space-y-4">
@@ -2493,7 +2511,7 @@ export function MedicalTimelineTab({
         onPreview={(s) => { setDetailSignal(null); openSignalEvidence(s); }}
       />
     )}
-    {compareOpen && <ConditionCompareDrawer rows={compareRows} onClose={() => setCompareOpen(false)} />}
+    {compareOpen && <ConditionCompareDrawer rows={compareRows} unlinkedPost={unlinkedPost} onClose={() => setCompareOpen(false)} />}
 
     {/* Evidence Review Workspace — PDF viewer + AI analysis tools */}
     <EvidenceReviewModal

@@ -98,6 +98,48 @@ export const PRACTITIONERS: Practitioner[] = [
 
 export const hospitalById = (id?: string) => HOSPITALS.find((h) => h.id === id);
 export const practitionerById = (id: string) => PRACTITIONERS.find((p) => p.id === id);
+
+// ── Which providers belong to which case ─────────────────────────────────────
+// Case → Primary Medical Providers → the practitioners named at them. The
+// Chronology's Medical Practitioners card reads this for whichever case is
+// open, so it shows that case's practitioners — however many there are — and
+// nothing from any other case. A case with no entry has none on record.
+
+export interface CaseMedicalProviders {
+  /** Every reference the case goes by: its intake number and its workspace number. */
+  caseRefs: string[];
+  /** The case's Primary Medical Providers, as its Case Intelligence Summary lists them. */
+  facilityIds: string[];
+  /** The practitioners the case record names as treating the plaintiff. */
+  practitionerIds: string[];
+}
+
+export const CASE_MEDICAL_PROVIDERS: CaseMedicalProviders[] = [
+  {
+    // Estate of Miller vs Logistics Co.
+    caseRefs: ["CASE-94101", "PI-2024-001"],
+    facilityIds: ["cook-county-medical-center", "physical-therapy-associates"],
+    practitionerIds: ["sarah-mitchell"],
+  },
+];
+
+/** A case's practitioners, its primary facilities, and — kept separate — the
+ *  facilities where the record names no practitioner. */
+export function medicalProvidersForCase(caseRef?: string): {
+  practitioners: Practitioner[];
+  facilities: Hospital[];
+  unnamedFacilities: Hospital[];
+} {
+  const entry = CASE_MEDICAL_PROVIDERS.find((c) => !!caseRef && c.caseRefs.includes(caseRef));
+  const practitioners = (entry?.practitionerIds ?? [])
+    .map((id) => practitionerById(id))
+    .filter((p): p is Practitioner => !!p);
+  const facilities = (entry?.facilityIds ?? [])
+    .map((id) => hospitalById(id))
+    .filter((h): h is Hospital => !!h);
+  const staffed = new Set(practitioners.map((p) => p.hospitalId));
+  return { practitioners, facilities, unnamedFacilities: facilities.filter((h) => !staffed.has(h.id)) };
+}
 /** The practitioners in this case's own medical record. */
 export const TREATING_PRACTITIONERS = PRACTITIONERS.filter((p) => p.involvement === "treating");
 
