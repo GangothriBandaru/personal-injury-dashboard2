@@ -137,6 +137,7 @@ export function DeliverablePage({
         return (
           <MedicalTimelineTab
             {...tabProps}
+            hideEventChronology
             userChronology={userChronology}
             onAddChronology={(k, ev) =>
               onUserChronologyChange?.({ ...userChronology, [k]: [...userChronology[k], ev] })

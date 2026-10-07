@@ -474,15 +474,12 @@ export function DemoBadge() {
 
 // A Case Snapshot information tile. A value the record does not hold reads
 // "Not available" in the muted tone.
-function SnapshotTile({ icon: Icon, label, value }: { icon: any; label: string; value?: string }) {
+// The sidebar is compact, so the tile carries no icon: the label has the
+// tile's full width and wraps only between words.
+function SnapshotTile({ label, value }: { label: string; value?: string }) {
   return (
-    <div className="rounded-xl border border-line bg-white p-3 min-w-0">
-      {/* The sidebar is narrower than Case Overview's, so a long label wraps
-          rather than being cut short. */}
-      <div className="flex items-start gap-1.5 mb-1.5">
-        <Icon className="w-3.5 h-3.5 text-deep shrink-0 mt-px" strokeWidth={1.75} />
-        <span className="eyebrow leading-tight">{label}</span>
-      </div>
+    <div className="rounded-xl border border-line bg-white p-2.5 min-w-0">
+      <div className="eyebrow leading-tight mb-1">{label}</div>
       {value
         ? <div className="text-sm font-semibold text-ink leading-snug break-words">{value}</div>
         : <div className="text-sm text-[#8A98A3] leading-snug">{NA}</div>}
@@ -498,45 +495,44 @@ function ProviderPractitioner({ p, provider, onProfile }: { p: Practitioner; pro
   // provider they are grouped under — stated, not reconciled.
   const ownHospital = p.hospitalId && p.hospitalId !== provider.id ? hospitalById(p.hospitalId) : undefined;
   return (
-    <div className="rounded-xl border border-line bg-offwhite p-3">
-      <div className="flex items-center justify-between gap-2 mb-1.5">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <UserRound className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
-          <span className="eyebrow truncate">Medical Practitioner</span>
-        </div>
-        <button
-          onClick={() => setBioOpen((o) => !o)}
-          aria-expanded={bioOpen}
-          className="flex items-center gap-1 text-xs font-medium text-deep hover:text-ink transition-colors shrink-0"
-        >
-          {bioOpen ? "Hide biography" : "View biography"}
-          <ChevronDown className={`w-3.5 h-3.5 transition-transform ${bioOpen ? "rotate-180" : ""}`} strokeWidth={1.75} />
-        </button>
+    <div className="pt-3 border-t border-line">
+      <div className="flex items-center gap-1.5 mb-1.5">
+        <UserRound className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+        <span className="eyebrow">Medical Practitioner</span>
       </div>
       <div className="flex items-center gap-2 flex-wrap">
-        <button onClick={onProfile} title="Open the full profile" className="text-left text-sm font-semibold text-ink leading-snug hover:text-deep transition-colors">
+        <button onClick={onProfile} title="Open the full profile" className="text-left text-[15px] font-semibold text-ink leading-snug hover:text-deep transition-colors">
           {p.name}
         </button>
         {p.demo && <DemoBadge />}
       </div>
-      <div className="text-xs text-[#5B6B78] mt-0.5">{p.role}</div>
+      <div className="text-sm text-[#5B6B78] mt-0.5">{p.role}</div>
+      {/* Beneath the designation, so the compact sidebar never cuts the
+          heading short to make room for it. */}
+      <button
+        onClick={() => setBioOpen((o) => !o)}
+        aria-expanded={bioOpen}
+        className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-deep hover:text-ink transition-colors"
+      >
+        {bioOpen ? "Hide biography" : "View biography"}
+        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${bioOpen ? "rotate-180" : ""}`} strokeWidth={1.75} />
+      </button>
       {bioOpen && (
         <p className="secondary-text leading-relaxed mt-2.5 pt-2.5 border-t border-line">{p.biography ?? "Biography not available."}</p>
       )}
 
       <div className="grid grid-cols-2 gap-2 mt-2.5">
-        <SnapshotTile icon={Stethoscope} label="Specialization" value={p.specializations.join(" · ") || undefined} />
-        <SnapshotTile icon={Clock} label="Experience" value={formatExperience(p.experienceYears)} />
-        <SnapshotTile icon={Building2} label="Hospital / Workplace" value={provider.name} />
-        <SnapshotTile icon={MapPin} label="Hospital Location" value={provider.location} />
-        <SnapshotTile icon={Layers} label="Hospital Size" value={provider.size} />
-        <SnapshotTile icon={Landmark} label="Hospital Type" value={provider.ownership} />
+        <SnapshotTile label="Specialization" value={p.specializations.join(" · ") || undefined} />
+        <SnapshotTile label="Experience" value={formatExperience(p.experienceYears)} />
+        <SnapshotTile label="Hospital / Workplace" value={provider.name} />
+        <SnapshotTile label="Hospital Location" value={provider.location} />
+        <SnapshotTile label="Hospital Size" value={provider.size} />
+        <SnapshotTile label="Hospital Type" value={provider.ownership} />
         <SnapshotTile
-          icon={Network}
           label="Organization"
           value={provider.structure && provider.healthSystem ? `${provider.structure} — ${provider.healthSystem}` : provider.structure}
         />
-        <SnapshotTile icon={MapIcon} label="Location Type" value={provider.locationType} />
+        <SnapshotTile label="Location Type" value={provider.locationType} />
       </div>
       {provider.demo && (
         <p className="text-xs text-[#5B6B78] mt-2">Hospital details above are demo values, not from the case record.</p>
@@ -569,21 +565,25 @@ export function PractitionerSnapshotCard({ caseRef }: { caseRef?: string }) {
 
   return (
     <>
-      <div className="lg-card p-6 flex flex-col">
-        <h3 className="card-title">
-          Medical Practitioners{" "}
-          <span className="text-[#5B6B78] font-medium">· {groups.length} {groups.length === 1 ? "Provider" : "Providers"}</span>
-        </h3>
-        <p className="secondary-text mt-0.5 mb-4">
-          {practitionerCount} named {practitionerCount === 1 ? "practitioner" : "practitioners"}
-        </p>
+      <div className="lg-card p-4 flex flex-col">
+        {/* The heading stays at the top of the sidebar while the providers
+            scroll beneath it — the sidebar is the only scroll area. */}
+        <div className="lg:sticky lg:top-0 z-10 bg-white rounded-t-[14px] -mx-4 -mt-4 px-4 pt-4 pb-3">
+          <h3 className="card-title">
+            Medical Practitioners{" "}
+            <span className="text-[#5B6B78] font-medium">· {groups.length} {groups.length === 1 ? "Provider" : "Providers"}</span>
+          </h3>
+          <p className="secondary-text mt-0.5">
+            {practitionerCount} named {practitionerCount === 1 ? "practitioner" : "practitioners"}
+          </p>
+        </div>
 
         {groups.length === 0 ? (
           <p className="secondary-text">No medical providers are on this case&apos;s record.</p>
         ) : (
-          // The provider list scrolls inside the card, sized to the window so the
-          // whole card — Find Similar Doctors included — stays in view.
-          <div className="max-h-[max(220px,calc(100vh-570px))] overflow-y-auto overscroll-contain -mr-2 pr-2 space-y-2.5">
+          // The providers flow in the card at full height: no scroll area of
+          // their own, so the sidebar scrolls as one.
+          <div className="space-y-2.5">
             {groups.map(({ provider, practitioners }) => {
               const open = openIds.has(provider.id);
               return (
@@ -607,7 +607,7 @@ export function PractitionerSnapshotCard({ caseRef }: { caseRef?: string }) {
                   </button>
 
                   {open && (
-                    <div className="px-3 pb-3 space-y-2.5">
+                    <div className="px-2.5 pb-3 space-y-3">
                       {practitioners.length === 0 ? (
                         <div className="rounded-xl border border-dashed border-line bg-white p-3 text-sm text-[#8A98A3]">
                           No named practitioner identified
@@ -634,9 +634,10 @@ export function PractitionerSnapshotCard({ caseRef }: { caseRef?: string }) {
           </div>
         )}
 
-        {/* Find Similar Doctors — one, fixed at the foot of the card */}
+        {/* Find Similar Doctors — one, at the foot of the card, held at the
+            bottom of the sidebar while the providers above it are in view */}
         {reference && (
-          <div className="pt-4 mt-4 border-t border-line shrink-0">
+          <div className="lg:sticky lg:bottom-0 z-10 bg-white rounded-b-[14px] -mx-4 -mb-4 px-4 pb-4 pt-3 mt-3 border-t border-line shrink-0">
             <button
               onClick={() => setStack([{ kind: "search", fromId: reference.id }])}
               title={`Similar to ${reference.name}`}

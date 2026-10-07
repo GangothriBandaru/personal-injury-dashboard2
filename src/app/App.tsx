@@ -16,6 +16,8 @@ import { ValuationPage } from "./pages/ValuationPage";
 import { CaseReadyPage } from "./pages/CaseReadyPage";
 import { CaseWorkspacePage } from "./pages/CaseWorkspacePage";
 import { DeliverablePage, type DeliverableKind } from "./pages/DeliverablePage";
+import { JurisdictionReviewPage } from "./pages/JurisdictionReviewPage";
+import type { AttorneyDecision } from "./jurisdiction/jurisdictionData";
 import { EMPTY_USER_CHRONOLOGY, type UserChronology } from "./workspace/WorkspaceTabs";
 import { NotesProvider } from "./notes/NotesContext";
 import { FloatingNotes } from "./components/FloatingNotes";
@@ -94,6 +96,11 @@ export default function App() {
   // Chronology entries the attorney added by hand — held here so the Case
   // Workspace's Chronology and the Medical Chronology deliverable share them.
   const [userChronology, setUserChronology] = useState<UserChronology>(EMPTY_USER_CHRONOLOGY);
+  // The attorney's jurisdiction decision per case, kept while the app is open
+  // so leaving the review and coming back keeps the decision and its history.
+  const [jurisdictionDecisions, setJurisdictionDecisions] = useState<Record<string, AttorneyDecision>>({});
+  const caseKey = selectedCase?.caseId ?? "";
+  const jurisdictionDecision = jurisdictionDecisions[caseKey];
   const openDeliverable = (kind: DeliverableKind) => {
     setDeliverable(kind);
     setActivePage("deliverable");
@@ -126,7 +133,7 @@ export default function App() {
     if (activePage !== "analysis" && activePage !== "case-ready") setReturnToSection(undefined);
     // The insurance pages are full pages, so each opens at the top of the
     // scrolling main area rather than wherever the previous page was left.
-    if (activePage === "insurance" || activePage === "insurance-detail" || activePage === "deliverable") {
+    if (activePage === "insurance" || activePage === "insurance-detail" || activePage === "deliverable" || activePage === "jurisdiction") {
       document.querySelector("main")?.scrollTo(0, 0);
     }
   }, [activePage]);
@@ -207,7 +214,20 @@ export default function App() {
               setActivePage("valuation");
             }}
             onOpenInsurance={() => openInsuranceFrom("analysis")}
+            onOpenJurisdiction={() => setActivePage("jurisdiction")}
+            governingLaw={jurisdictionDecision?.status === "approved" ? jurisdictionDecision.governingLaw : undefined}
             scrollToSection={returnToSection}
+          />
+        );
+      case "jurisdiction":
+        return (
+          <JurisdictionReviewPage
+            key={caseKey}
+            caseData={selectedCase}
+            decision={jurisdictionDecision}
+            onDecisionChange={(next) => setJurisdictionDecisions((prev) => ({ ...prev, [caseKey]: next }))}
+            onBack={() => setActivePage("analysis")}
+            onStageClick={handleStageNavigation}
           />
         );
       case "insurance":
@@ -311,6 +331,7 @@ export default function App() {
     workflow: "Collection",
     classification: "Collection",
     analysis: "Analysis",
+    jurisdiction: "Analysis",
     insurance: insuranceOrigin === "analysis" ? "Analysis" : "Case Ready",
     "insurance-detail": insuranceOrigin === "analysis" ? "Analysis" : "Case Ready",
     valuation: "Valuation",
@@ -323,7 +344,7 @@ export default function App() {
   // Human label for wherever the attorney currently is, for the assistant.
   const PAGE_LABEL: Record<string, string> = {
     intake: "Case Intake", workflow: "Case Intake", classification: "Classification",
-    analysis: "Analysis", valuation: "Valuation", "case-ready": "Case Ready", deliverable: "Case Ready",
+    analysis: "Analysis", jurisdiction: "Attorney Jurisdiction Review", valuation: "Valuation", "case-ready": "Case Ready", deliverable: "Case Ready",
     workspace: "Case Workspace", cases: "Case Workspace", clients: "Clients",
     communication: "Communication", demands: "Demand Letters", templates: "Templates",
   };

@@ -1789,7 +1789,15 @@ function ConditionCompareView({
 
 export function MedicalTimelineTab({
   model, documents, goTo, findings = [], userChronology = EMPTY_USER_CHRONOLOGY, onAddChronology,
-}: TabProps & { userChronology?: UserChronology; onAddChronology?: (kind: "medical" | "event", ev: ChronEvent) => void }) {
+  hideEventChronology = false,
+}: TabProps & {
+  userChronology?: UserChronology;
+  onAddChronology?: (kind: "medical" | "event", ev: ChronEvent) => void;
+  /** Leaves out Event Chronology entirely — its tab and its Timeline
+   *  Navigator card. The Case Ready Medical Chronology deliverable is medical
+   *  only; the Chronology stage keeps all three tabs. */
+  hideEventChronology?: boolean;
+}) {
   // Medical and Event Chronology answer "what happened and when"; Medical
   // Conditions answers what the plaintiff's condition was before and after.
   const [subTab, setSubTab] = useState<"medical" | "event" | "conditions">("medical");
@@ -1999,16 +2007,27 @@ export function MedicalTimelineTab({
   const workspaceRef = useRef<HTMLDivElement>(null);
   const panelHeight = useWorkspacePanelHeight(workspaceRef, 520);
 
+  // Medical Chronology, Event Chronology and Medical Conditions share the one
+  // chronology scroll area. A newly chosen tab opens at its start rather than
+  // part-way down wherever the previous tab was left.
+  const chronoScrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = chronoScrollRef.current;
+    if (el && el.scrollTop > 0) el.scrollTo({ top: 0 });
+  }, [subTab]);
+
   return (
     <>
+    {/* A compact sidebar of controlled width — its content wraps, it never
+        widens — and the chronology takes all the remaining width. */}
     <div
       ref={workspaceRef}
-      className="w-full grid grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)] gap-6 items-start lg:items-stretch"
+      className="w-full grid grid-cols-1 lg:grid-cols-[minmax(280px,320px)_minmax(0,1fr)] gap-6 items-start lg:items-stretch"
       style={panelHeight ? { height: panelHeight } : undefined}
     >
       {/* RIGHT — the chronology, the one scroll area of the workspace; reaching
           its end does not carry on into the page */}
-      <div className="min-w-0 order-2 rounded-2xl border border-line bg-offwhite p-8 space-y-8 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain">
+      <div ref={chronoScrollRef} className="min-w-0 order-2 rounded-2xl border border-line bg-offwhite p-6 xl:p-8 space-y-8 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain">
       {/* Header */}
       <div className="flex items-start justify-between gap-6">
         <div>
@@ -2023,19 +2042,20 @@ export function MedicalTimelineTab({
       {/* Toolbar (tabs + controls) with the active date-filter chip beneath it */}
       <div className="space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        {/* Left — chronology tabs */}
-        <div className="flex items-center gap-2">
+        {/* Left — chronology tabs. A label never breaks across lines; only on
+            the narrowest desktop width does a whole tab move to a second row. */}
+        <div className="flex items-center gap-2 flex-wrap">
           {([
             { key: "medical", label: "Medical Chronology", count: medicalAll.length },
             { key: "event", label: "Event Chronology", count: eventAll.length },
             { key: "conditions", label: "Medical Conditions", count: injurySignals.length },
-          ] as const).map((t) => {
+          ] as const).filter((t) => !(hideEventChronology && t.key === "event")).map((t) => {
             const active = subTab === t.key;
             return (
               <button
                 key={t.key}
                 onClick={() => selectSubTab(t.key)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                className={`flex items-center gap-2 px-3 xl:px-4 py-2 rounded-lg text-sm font-medium border whitespace-nowrap shrink-0 transition-colors ${
                   active ? "bg-tint border-brand text-deep" : "bg-white border-line text-[#5B6B78] hover:border-soft hover:text-ink"
                 }`}
               >
@@ -2412,9 +2432,10 @@ export function MedicalTimelineTab({
 
       </div>
 
-      {/* LEFT — Medical Practitioner, Filters, Timeline Navigator: static while
-          the chronology scrolls. Only when the three together are taller than
-          the window does the column scroll, as one. First on narrow screens. */}
+      {/* LEFT — Medical Practitioners, Filters, Timeline Navigator: static while
+          the chronology scrolls, and one scroll area of its own when taller
+          than the window — nothing inside it scrolls separately. First on
+          narrow screens. */}
       <div className="min-w-0 order-1 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain">
       <div className="space-y-6">
 
@@ -2543,7 +2564,7 @@ export function MedicalTimelineTab({
           {([
             { key: "medical", num: medicalAll.length, label: "Medical Events", helper: "Verified treatment timeline" },
             { key: "event", num: eventAll.length, label: "Case Events", helper: "Incident & legal timeline" },
-          ] as const).map((c) => {
+          ] as const).filter((c) => !(hideEventChronology && c.key === "event")).map((c) => {
             const active = subTab === c.key;
             return (
               <button

@@ -30,6 +30,10 @@ interface AnalysisPageProps {
   onProceedToValuation?: () => void;
   /** Opens the Insurance Policy Analysis summary. */
   onOpenInsurance?: () => void;
+  /** Opens the Attorney Jurisdiction Review for this case. */
+  onOpenJurisdiction?: () => void;
+  /** The governing law the attorney has approved, once there is one. */
+  governingLaw?: string;
   /** Section to bring into view on arrival — used when returning from a sub-page. */
   scrollToSection?: string;
 }
@@ -132,7 +136,7 @@ const timelineEvents: TimelineEvent[] = [
 // Total events LECO extracted from the record; the timeline surfaces only the key ones
 const EXTRACTED_EVENT_COUNT = 53;
 
-export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToIntake, onProceedToValuation, onOpenInsurance, scrollToSection }: AnalysisPageProps) {
+export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToIntake, onProceedToValuation, onOpenInsurance, onOpenJurisdiction, governingLaw, scrollToSection }: AnalysisPageProps) {
   // Returning from a sub-page lands back on the section it was opened from.
   useEffect(() => {
     if (!scrollToSection) return;
@@ -286,11 +290,14 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
   };
 
   // Case Intelligence Summary fields
-  const summaryRows = [
+  // Jurisdiction opens the Attorney Jurisdiction Review. Governing Law reads
+  // "Any state" until the attorney approves one there.
+  const summaryRows: { icon: any; label: string; value?: string; onClick?: () => void; hint?: string }[] = [
     { icon: User, label: "Plaintiff", value: data.plaintiff },
     { icon: Building2, label: "Defendant", value: "Memory Care Facility LLC" },
     { icon: Shield, label: "Insurance Carrier", value: "ABC Professional Liability Insurance" },
-    { icon: Scale, label: "Jurisdiction", value: data.jurisdiction },
+    { icon: Scale, label: "Jurisdiction", value: data.jurisdiction, onClick: onOpenJurisdiction, hint: "Open the Attorney Jurisdiction Review" },
+    { icon: Gavel, label: "Governing Law", value: governingLaw ?? "Any state" },
   ];
 
   return (
@@ -357,15 +364,32 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              {summaryRows.map(({ icon: Icon, label, value }) => (
-                <div key={label} className="lg-zone lg-zone-grey p-4">
-                  <div className="eyebrow flex items-center gap-1.5 mb-1.5">
-                    <Icon className="w-4 h-4 text-deep" strokeWidth={1.75} />
-                    {label}
-                  </div>
-                  <p className="text-sm font-semibold text-ink leading-snug">{value}</p>
-                </div>
-              ))}
+              {summaryRows.map(({ icon: Icon, label, value, onClick, hint }) => {
+                const body = (
+                  <>
+                    <div className="eyebrow flex items-center gap-1.5 mb-1.5">
+                      <Icon className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                      {label}
+                    </div>
+                    <p className="text-sm font-semibold text-ink leading-snug">{value}</p>
+                  </>
+                );
+                return onClick ? (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={onClick}
+                    title={hint}
+                    aria-label={`${label}: ${value}. ${hint}`}
+                    className="group relative text-left flex flex-col justify-start lg-zone lg-zone-grey p-4 cursor-pointer transition-all hover:border-soft hover:shadow-sm active:scale-[0.99]"
+                  >
+                    {body}
+                    <ArrowUpRight className="absolute top-3 right-3 w-3.5 h-3.5 text-deep opacity-60 group-hover:opacity-100 transition-opacity" strokeWidth={2} />
+                  </button>
+                ) : (
+                  <div key={label} className="lg-zone lg-zone-grey p-4">{body}</div>
+                );
+              })}
 
               <div className="lg-zone lg-zone-grey p-4">
                 <div className="eyebrow flex items-center gap-1.5 mb-1.5">
