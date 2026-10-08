@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { CaseIntakeControlBar } from "../components/CaseIntakeControlBar";
+import { addIntakeCase, nextCaseId, updatedLabel, useCreatedIntakeCases } from "../intake/intakeCaseStore";
 import { IntakeCard } from "../components/IntakeCard";
 import { Plus, X, ArrowRight } from "lucide-react";
 import { Button } from "../components/ui/button";
@@ -107,7 +108,19 @@ const caseTypes = [
 
 export function CaseIntakePage({ onOpenWorkflow }: CaseIntakePageProps) {
   const [showNewCaseModal, setShowNewCaseModal] = useState(false);
-  const [intakeCases, setIntakeCases] = useState(initialIntakeCases);
+  // The sample cases first, then every created case in creation order. Created
+  // cases come from the intake store, so they are still here after leaving
+  // Case Intake and coming back, or reloading the page.
+  const createdCases = useCreatedIntakeCases();
+  const intakeCases: any[] = [
+    ...initialIntakeCases,
+    ...createdCases.map((c) => ({ ...c, lastUpdated: updatedLabel(c.createdAt) })),
+  ];
+  const [search, setSearch] = useState("");
+  const q = search.trim().toLowerCase();
+  const visibleCases = q
+    ? intakeCases.filter((c) => [c.caseName, c.plaintiff, c.caseId].some((v) => String(v ?? "").toLowerCase().includes(q)))
+    : intakeCases;
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const [caseName, setCaseName] = useState("");
@@ -120,24 +133,22 @@ export function CaseIntakePage({ onOpenWorkflow }: CaseIntakePageProps) {
   const [caseType, setCaseType] = useState("");
 
   const handleCreateCase = () => {
-    const newCaseId = `PI-2024-${String(intakeCases.length + 1).padStart(3, "0")}`;
-    const newCase: any = {
-      caseName,
-      caseId: newCaseId,
-      plaintiff: plaintiffName,
-      summary: caseSummary,
-      jurisdiction,
+    addIntakeCase({
+      caseName: caseName.trim(),
+      // Unique against every case on the list, in the existing ID format.
+      caseId: nextCaseId(intakeCases.map((c) => c.caseId)),
+      plaintiff: plaintiffName.trim(),
+      summary: caseSummary.trim(),
+      jurisdiction: jurisdiction.trim(),
+      ...(plaintiffEmail.trim() && { plaintiffEmail: plaintiffEmail.trim() }),
+      ...(plaintiffPhone.trim() && { plaintiffPhone: plaintiffPhone.trim() }),
+      ...(dateOfIncident && { dateOfIncident }),
+      ...(caseType && { caseType }),
       stage: "Client Intake",
       progress: 0,
-      lastUpdated: "Just now",
       isReady: false,
-    };
-
-    if (plaintiffEmail) {
-      newCase.plaintiffEmail = plaintiffEmail;
-    }
-
-    setIntakeCases([newCase, ...intakeCases]);
+      createdAt: new Date().toISOString(),
+    });
     setShowNewCaseModal(false);
 
     // Reset form
@@ -164,7 +175,7 @@ export function CaseIntakePage({ onOpenWorkflow }: CaseIntakePageProps) {
           </p>
         </div>
 
-        {!showEmptyState && <CaseIntakeControlBar onNewCase={() => setShowNewCaseModal(true)} />}
+        {!showEmptyState && <CaseIntakeControlBar search={search} onSearch={setSearch} onNewCase={() => setShowNewCaseModal(true)} />}
 
         {showEmptyState ? (
           <div className="flex flex-col items-center justify-center py-16 px-4">
@@ -183,8 +194,11 @@ export function CaseIntakePage({ onOpenWorkflow }: CaseIntakePageProps) {
             </div>
           </div>
         ) : (
+          visibleCases.length === 0 ? (
+          <p className="body-text text-center py-12">No cases match “{search.trim()}”.</p>
+          ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {intakeCases.map((intakeCase: any) => (
+            {visibleCases.map((intakeCase: any) => (
               <IntakeCard
                 key={intakeCase.caseId}
                 {...intakeCase}
@@ -195,6 +209,8 @@ export function CaseIntakePage({ onOpenWorkflow }: CaseIntakePageProps) {
                     plaintiff: intakeCase.plaintiff,
                     summary: intakeCase.summary,
                     plaintiffEmail: intakeCase.plaintiffEmail,
+                    plaintiffPhone: intakeCase.plaintiffPhone,
+                    dateOfIncident: intakeCase.dateOfIncident,
                     jurisdiction: intakeCase.jurisdiction,
                     stage: intakeCase.stage,
                     caseType: intakeCase.caseType,
@@ -204,6 +220,7 @@ export function CaseIntakePage({ onOpenWorkflow }: CaseIntakePageProps) {
               />
             ))}
           </div>
+          )
         )}
       </div>
 

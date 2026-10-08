@@ -1,3 +1,4 @@
+import { fileKind } from "../components/fileType";
 export interface CaseDocument {
   id: string;
   name: string;
@@ -60,6 +61,7 @@ export interface ClassificationCategory {
 // ── Classification rules ──────────────────────────────────────────────────────
 export function classifyDocuments(docs: CaseDocument[]): ClassificationCategory[] {
   const buckets: Record<string, CaseDocument[]> = {
+    "Video & Photos": [],
     "Medical Records": [],
     "Police Reports": [],
     "Insurance Documents": [],
@@ -70,6 +72,13 @@ export function classifyDocuments(docs: CaseDocument[]): ClassificationCategory[
 
   for (const doc of docs) {
     const n = doc.name.toLowerCase();
+    // Video and photos are media evidence, analysed on their own — never filed
+    // as documents, whatever their name suggests.
+    const kind = fileKind(doc.name);
+    if (kind === "image" || kind === "video") {
+      buckets["Video & Photos"].push(doc);
+      continue;
+    }
     // `er_` is anchored to a name segment so it matches ER_Bills but not
     // "lett(er_)draft" / "offic(er_)narrative"; bare `records` is intentionally
     // absent so "Carrier_Records" is not read as a medical file — the specific

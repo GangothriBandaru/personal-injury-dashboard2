@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { FileTypeIcon, FileTypeTag } from "../components/fileType";
 import { StageNavigator } from "../components/StageNavigator";
 import { CaseSnapshot } from "../components/CaseSnapshot";
@@ -6,6 +6,29 @@ import { Send, Upload, CheckCircle, Circle, ArrowRight, Check, X, FileText, Copy
 import { Button } from "../components/ui/button";
 import { DocActions, DocumentWorkspaceModal } from "../components/DocumentWorkspace";
 import { PipelineState, CaseDocument, classifyDocuments, detectMissingEvidence } from "../types/case";
+import {
+  useIntakeRequests, createIntakeRequest, updateIntakeRequest, adoptExistingIntakeRequest, formatShortDate,
+  type IntakeRequest, type UploadedDocument,
+} from "../intake/intakeRequestStore";
+import { RequestLinkRow } from "../intake/RequestLinkRow";
+import { Camera } from "lucide-react";
+import { VideoPhotoUploadModal } from "../intake/VideoPhotoUploadModal";
+import { MediaEvidencePanel } from "../intake/MediaEvidencePanel";
+import { useMediaEvidence } from "../intake/mediaEvidenceStore";
+import { MEDIA_OPTIONS, NO_MEDIA, intakeMessageText, type RequestedMedia } from "../intake/intakeMessage";
+import { Video as VideoIcon, ScanLine } from "lucide-react";
+
+// The documents an additional request asks for (unchanged from before).
+const ADDITIONAL_DOCS = ["Wage Loss Records", "Employment Records", "Pharmacy Records"];
+const MEDIA_ICON = { videos: VideoIcon, scenePhotos: Camera, medicalImages: ScanLine } as const;
+
+function NewBadge() {
+  return <span className="pill pill-neutral shrink-0 text-[10px] font-bold tracking-[0.06em]">NEW</span>;
+}
+
+// Who intake requests are sent from — the signed-in attorney, as the existing
+// request message templates sign them.
+const INTAKE_SENDER = { name: "Jennifer Davis", firm: "LexGuard Injury Intel" };
 
 interface IntakeWorkflowPageProps {
   caseData?: {
@@ -179,9 +202,13 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
   const hasPhone = !!clientPhone;
   const hasContact = hasEmail || hasPhone;
 
+  // Intake requests sent for this case — stored, so they are still here after
+  // leaving the case, and each carries its own client link and uploads.
+  const storedRequests = useIntakeRequests(data.caseId);
+
   // Pipeline-derived state (shared)
-  const intakeCreated = pipeline.intakeCreated;
-  const intakeSent = pipeline.intakeSent;
+  const intakeCreated = pipeline.intakeCreated || storedRequests.length > 0;
+  const intakeSent = pipeline.intakeSent || storedRequests.length > 0;
   const retainerStatus = pipeline.retainerStatus;
 
   const setIntakeCreated = (v: boolean) => onPipelineUpdate({ intakeCreated: v });
@@ -232,13 +259,56 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
     lastModified?: string;
     docsReceived?: number;
     missingDocs?: number;
+    /** Stored requests only: the client link token and what the client uploaded. */
+    token?: string;
+    uploads?: UploadedDocument[];
+    /** The notes from the client's latest submission, if they wrote any. */
+    clientNotes?: string;
   }
-  const [intakeRequests, setIntakeRequests] = useState<IntakeRequestRecord[]>([]);
+  const toRecord = (r: IntakeRequest): IntakeRequestRecord => ({
+    id: r.id,
+    token: r.token,
+    status: r.status,
+    version: r.version,
+    recipient: (r.deliveryMethod === "sms" ? r.recipientPhone : r.recipientEmail) ?? r.plaintiff,
+    deliveryMethod: r.deliveryMethod,
+    requestedDocs: r.requestedDocs,
+    created: formatShortDate(r.createdAt),
+    lastSent: formatShortDate(r.lastSentAt),
+    lastModified: r.lastModifiedAt ? formatShortDate(r.lastModifiedAt) : undefined,
+    docsReceived: r.docsReceived ?? (r.submissions?.length ? r.uploads.length : undefined),
+    missingDocs: r.missingDocs,
+    uploads: r.uploads,
+    clientNotes: [...(r.submissions ?? [])].reverse().find((s) => s.notes)?.notes,
+  });
+  const intakeRequests: IntakeRequestRecord[] = storedRequests.map(toRecord);
+  const tokenOf = (id: string) => storedRequests.find((r) => r.id === id)?.token;
   // Captured once at mount: an existing/progressed case arrives with the intake
   // already sent AND its documents already on file, so its intake response is
   // treated as already received. A brand-new case (no documents yet) starts false
   // and only advances through the real send flow.
   const [intakeAlreadySent] = useState(pipeline.intakeSent && pipeline.documents.length > 0);
+  // A case that arrives with its intake request already sent (the sample
+  // cases) has that request stored once, as the same REQ-001 its card has
+  // always shown — now with its own client link. Never a second request.
+  useEffect(() => {
+    if (!pipeline.intakeSent || storedRequests.length > 0) return;
+    adoptExistingIntakeRequest({
+      caseId: data.caseId,
+      caseName: data.caseName,
+      plaintiff: data.plaintiff,
+      sender: INTAKE_SENDER,
+      deliveryMethod,
+      recipientEmail: hasEmail ? editableEmail : undefined,
+      recipientPhone: hasPhone ? editablePhone : undefined,
+      requestedDocs: documents.filter((d) => d.enabled).map((d) => d.name),
+      instructions: "",
+      createdAt: "2026-06-08T12:00:00.000Z",
+      ...(intakeAlreadySent
+        ? { status: "Completed" as const, docsReceived: 8, missingDocs: 1 }
+        : { status: "Sent" as const }),
+    });
+  }, [data.caseId, pipeline.intakeSent, storedRequests.length]);
   const [intakeOverflowOpen, setIntakeOverflowOpen] = useState<string | null>(null);
   const [intakeModalMode, setIntakeModalMode] = useState<"create" | "modify" | "additional">("create");
   const [activeModifyId, setActiveModifyId] = useState<string | null>(null);
@@ -248,7 +318,7 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
   const [viewingSubmissionId, setViewingSubmissionId] = useState<string | null>(null);
 
   // plaintiffActivityDetected is derived after sharedDocs — see below
-  const [documentsSubTab, setDocumentsSubTab] = useState<"retainer" | "intake">("intake");
+  const [documentsSubTab, setDocumentsSubTab] = useState<"retainer" | "intake" | "media">("intake");
   const [documentSearch, setDocumentSearch] = useState("");
   const [openActionMenu, setOpenActionMenu] = useState<string | null>(null);
 
@@ -272,12 +342,52 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
     ...overrides,
   });
 
+  // Sending creates a real request for this case: its own ID, secure token and
+  // client link, with the recipient, documents and instructions as chosen.
+  const recipientFields = () => ({
+    deliveryMethod,
+    recipientEmail: hasEmail ? editableEmail : undefined,
+    recipientPhone: hasPhone ? editablePhone : undefined,
+  });
+  // The video & photos this request asks for — chosen per request in the
+  // modal, stored on the request, and shown as upload areas on its link.
+  const [requestedMedia, setRequestedMedia] = useState<RequestedMedia>(NO_MEDIA);
+  useEffect(() => {
+    if (!showIntakeModal) return;
+    if (intakeModalMode === "modify" && activeModifyId) {
+      // Modify keeps what that request already asked for.
+      setRequestedMedia(storedRequests.find((r) => r.id === activeModifyId)?.requestedMedia ?? NO_MEDIA);
+    } else if (intakeModalMode === "additional") {
+      // An additional request starts from what earlier requests asked for.
+      const asked = storedRequests.map((r) => r.requestedMedia ?? NO_MEDIA);
+      setRequestedMedia({
+        videos: asked.some((m) => m.videos),
+        scenePhotos: asked.some((m) => m.scenePhotos),
+        medicalImages: asked.some((m) => m.medicalImages),
+      });
+    } else {
+      setRequestedMedia(NO_MEDIA);
+    }
+  }, [showIntakeModal]);
+
+  const sendNewRequest = (requestedDocs: string[], media: RequestedMedia = NO_MEDIA) =>
+    createIntakeRequest({
+      caseId: data.caseId,
+      caseName: data.caseName,
+      plaintiff: data.plaintiff,
+      sender: INTAKE_SENDER,
+      ...recipientFields(),
+      requestedDocs,
+      requestedMedia: media,
+      instructions: additionalInstructions.trim(),
+    });
+
   const handleSendRequestFromCard = () => {
     if (!hasContact) { setShowIntakeModal(true); return; }
     setIntakeSent(true);
     setEmailError(false);
-    if (intakeRequests.length === 0) {
-      setIntakeRequests([buildNewRequest()]);
+    if (storedRequests.length === 0) {
+      sendNewRequest(documents.filter((d) => d.enabled).map((d) => d.name));
     }
   };
 
@@ -287,33 +397,28 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
     setIntakeSent(true);
     setShowIntakeModal(false);
     setEmailError(false);
+    const selected = documents.filter((d) => d.enabled).map((d) => d.name);
+    const now = new Date().toISOString();
     if (intakeModalMode === "create") {
-      setIntakeRequests([buildNewRequest()]);
+      sendNewRequest(selected, requestedMedia);
     } else if (intakeModalMode === "modify" && activeModifyId) {
-      setIntakeRequests((prev) => prev.map((r) =>
-        r.id === activeModifyId
-          ? { ...r, requestedDocs: documents.filter((d) => d.enabled).map((d) => d.name), recipient: recipientEmail || r.recipient, deliveryMethod, version: r.version + 1, lastModified: "Jun 10, 2026", lastSent: "Jun 10, 2026" }
-          : r
-      ));
+      const token = tokenOf(activeModifyId);
+      if (token) {
+        updateIntakeRequest(token, (r) => ({
+          ...recipientFields(),
+          requestedDocs: selected,
+          requestedMedia,
+          instructions: additionalInstructions.trim(),
+          version: r.version + 1,
+          lastModifiedAt: now,
+          lastSentAt: now,
+        }));
+      }
     } else if (intakeModalMode === "additional") {
-      const additionalDocs = ["Wage Loss Records", "Employment Records", "Pharmacy Records"];
-      const nextId = `REQ-${String(intakeRequests.length + 1).padStart(3, "0")}`;
-      setIntakeRequests((prev) => [...prev, {
-        id: nextId, status: "Sent", version: 1,
-        recipient: recipientEmail || data.plaintiffEmail || data.plaintiff,
-        deliveryMethod, requestedDocs: additionalDocs,
-        created: "Jun 9, 2026", lastSent: "Jun 9, 2026",
-      }]);
+      sendNewRequest(ADDITIONAL_DOCS, requestedMedia);
     }
     setIntakeModalMode("create");
     setActiveModifyId(null);
-  };
-
-  const handleCreateForm = () => {
-    setIntakeCreated(true);
-    setIntakeSent(false);
-    setShowIntakeModal(false);
-    setEmailError(false);
   };
 
   const handleModifyRequest = (id: string) => {
@@ -330,9 +435,8 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
   };
 
   const handleMarkCompleted = (id: string) => {
-    setIntakeRequests((prev) => prev.map((r) =>
-      r.id === id ? { ...r, status: "Completed", docsReceived: 8, missingDocs: 1 } : r
-    ));
+    const token = tokenOf(id);
+    if (token) updateIntakeRequest(token, { status: "Completed", docsReceived: 8, missingDocs: 1 });
   };
 
   const handleOpenResend = (id: string) => {
@@ -341,11 +445,8 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
   };
 
   const handleConfirmResend = () => {
-    if (resendingId) {
-      setIntakeRequests((prev) => prev.map((r) =>
-        r.id === resendingId ? { ...r, lastSent: "Jun 10, 2026" } : r
-      ));
-    }
+    const token = resendingId ? tokenOf(resendingId) : undefined;
+    if (token) updateIntakeRequest(token, { lastSentAt: new Date().toISOString() });
     setShowResendModal(false);
     setResendingId(null);
   };
@@ -512,6 +613,78 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
     }
     e.target.value = "";
   };
+
+  // ── Video & photos — one upload flow, opened from the header menu and from
+  // every Upload Video & Photos card ──
+  const docInputRef = useRef<HTMLInputElement>(null);
+  const [uploadMenuOpen, setUploadMenuOpen] = useState(false);
+  // The one Upload Video & Photos modal, opened from the header menu and from
+  // every Upload Video & Photos card.
+  const [mediaModalOpen, setMediaModalOpen] = useState(false);
+  const media = useMediaEvidence(data.caseId);
+  const mediaFileCount = media.videos.length + media.sets.reduce((n, x) => n + x.files.length, 0);
+  const openMediaUpload = () => { setUploadMenuOpen(false); setMediaModalOpen(true); };
+  const openDocumentUpload = () => { setUploadMenuOpen(false); docInputRef.current?.click(); };
+  const viewMediaEvidence = () => { setDocumentsSubTab("media"); setActiveTab("documents"); };
+
+  // The Upload Video & Photos card — one card, two sizes: a tile beside the
+  // intake cards before any request exists, a panel beside Upload Existing
+  // Files once one does. Both open the same media upload.
+  // What has been uploaded so far, and the way to it.
+  const mediaFeedback = mediaFileCount > 0 && (
+    <p className="text-xs text-ink" onClick={(e) => e.stopPropagation()}>
+      <span className="font-semibold">{media.videos.length} {media.videos.length === 1 ? "video" : "videos"} · {media.sets.length} {media.sets.length === 1 ? "set" : "sets"}</span> on this case.{" "}
+      <button onClick={viewMediaEvidence} className="font-semibold text-deep hover:underline">View media evidence →</button>
+    </p>
+  );
+  const mediaCard = (variant: "tile" | "panel") =>
+    variant === "tile" ? (
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={openMediaUpload}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openMediaUpload(); } }}
+        className="lg-card lg-card-i p-8 group text-left cursor-pointer"
+      >
+        <div className="flex items-start gap-5 flex-wrap sm:flex-nowrap">
+          <div className="p-4 bg-tint rounded-xl inline-flex shrink-0">
+            <Camera className="w-6 h-6 text-deep" strokeWidth={1.75} />
+          </div>
+          <div className="min-w-0 flex-1 space-y-3">
+            <div className="flex items-center gap-2">
+              <h3 className="card-title">Upload Video &amp; Photos</h3>
+              <NewBadge />
+            </div>
+            <p className="secondary-text">Videos, scene photos and medical images. They are analysed on their own, not read as documents.</p>
+            <p className="text-xs text-[#5B6B78]">Examples: Dashcam footage • Phone photos • X-ray or MRI images</p>
+            {mediaFeedback}
+            <div className="flex items-center gap-2 text-deep font-medium text-sm group-hover:gap-3 transition-all">
+              Upload Video &amp; Photos
+              <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
+            </div>
+          </div>
+        </div>
+      </div>
+    ) : (
+      <div className="lg-card p-6">
+        <div className="flex items-center gap-2 mb-2">
+          <Camera className="w-4 h-4 text-deep" strokeWidth={1.75} />
+          <h3 className="card-title">Upload Video &amp; Photos</h3>
+          <NewBadge />
+        </div>
+        <p className="secondary-text mb-2">Videos, scene photos and medical images. They are analysed on their own, not read as documents.</p>
+        <p className="text-xs text-[#5B6B78] mb-4">Examples: Dashcam footage • Phone photos • X-ray or MRI images</p>
+        {mediaFeedback && <div className="mb-4">{mediaFeedback}</div>}
+        <button
+          onClick={openMediaUpload}
+          className="flex items-center gap-2 px-4 py-2 bg-white border border-line text-deep rounded-lg text-sm font-medium hover:bg-wash transition-all"
+        >
+          <Camera className="w-4 h-4" strokeWidth={1.75} />
+          Upload Video &amp; Photos
+          <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
+        </button>
+      </div>
+    );
 
   const handleSimulateUpload = (source: "Plaintiff" | "Attorney") => {
     const simulatedBatch: CaseDocument[] = [
@@ -1045,11 +1218,46 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
             <div className="flex items-center justify-between gap-4 px-6 py-5">
               <span className="card-title">Intake Request</span>
               <div className="flex items-center gap-3 shrink-0">
-                <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand hover:bg-deep text-white rounded-lg text-xs font-semibold transition-all cursor-pointer">
-                  <Upload className="w-3.5 h-3.5" strokeWidth={1.75} />
-                  Upload Docs
-                  <input type="file" multiple className="hidden" onChange={handleFileInputChange} />
-                </label>
+                {/* Upload ▾ — documents, or video & photos */}
+                <div className="relative">
+                  <button
+                    onClick={() => setUploadMenuOpen((o) => !o)}
+                    aria-haspopup="menu"
+                    aria-expanded={uploadMenuOpen}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand hover:bg-deep text-white rounded-lg text-xs font-semibold transition-all"
+                  >
+                    <Upload className="w-3.5 h-3.5" strokeWidth={1.75} />
+                    Upload
+                    <ChevronDown className={`w-3.5 h-3.5 transition-transform ${uploadMenuOpen ? "rotate-180" : ""}`} strokeWidth={1.75} />
+                  </button>
+                  {uploadMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-30" onClick={() => setUploadMenuOpen(false)} />
+                      <div role="menu" className="absolute right-0 top-full mt-2 z-40 w-72 rounded-xl border border-line bg-white shadow-lg p-1.5">
+                        <button role="menuitem" onClick={openDocumentUpload} className="w-full flex items-start gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-wash transition-colors">
+                          <div className="w-8 h-8 rounded-lg bg-tint flex items-center justify-center shrink-0">
+                            <FileText className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                          </div>
+                          <span className="min-w-0">
+                            <span className="block text-sm font-semibold text-ink">Documents</span>
+                            <span className="block text-xs text-[#5B6B78]">PDF, Word, scanned pages</span>
+                          </span>
+                        </button>
+                        <button role="menuitem" onClick={openMediaUpload} className="w-full flex items-start gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-wash transition-colors">
+                          <div className="w-8 h-8 rounded-lg bg-tint flex items-center justify-center shrink-0">
+                            <Camera className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                          </div>
+                          <span className="min-w-0">
+                            <span className="flex items-center gap-1.5 text-sm font-semibold text-ink">Video &amp; Photos <NewBadge /></span>
+                            <span className="block text-xs text-[#5B6B78]">Videos, scene photos, medical images</span>
+                          </span>
+                        </button>
+                      </div>
+                    </>
+                  )}
+                  {/* The existing document upload, and the one media upload */}
+                  <input ref={docInputRef} type="file" multiple className="hidden" onChange={handleFileInputChange} />
+                </div>
               </div>
             </div>
             <div className="border-t border-line p-6 bg-offwhite">
@@ -1106,16 +1314,20 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                         />
                       </label>
                     </div>
+                    {mediaCard("tile")}
                   </>
                 ) : (
 <>
                     <div className="space-y-4">
                       {(intakeRequests.length > 0 ? intakeRequests : [buildNewRequest(intakeAlreadySent ? { id: "REQ-001", status: "Completed", docsReceived: 8, missingDocs: 1 } : { id: "REQ-001", status: intakeSent ? "Sent" : "Draft" as any })]).map((req) => {
                         const isCompleted = req.status === "Completed";
-                        const isSent = req.status === "Sent" || req.status === "Draft";
+                        const isSent = ["Sent", "Draft", "Opened", "In Progress", "Partially Completed"].includes(req.status);
                         const statusColors: Record<string, string> = {
                           Draft: "pill pill-neutral",
                           Sent: "pill pill-progress",
+                          Opened: "pill pill-progress",
+                          "In Progress": "pill pill-progress",
+                          "Partially Completed": "pill pill-progress",
                           Completed: "pill pill-complete",
                           Expired: "pill pill-risk",
                           Cancelled: "pill pill-neutral",
@@ -1202,6 +1414,7 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                                     Last modified {req.lastModified}
                                   </div>
                                 )}
+                                {req.token && <RequestLinkRow token={req.token} uploads={req.uploads?.length ?? 0} />}
                               </>
                             ) : (
                               /* ── COMPLETED STATE ── */
@@ -1221,9 +1434,16 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                                   </div>
                                   <div className="px-5 py-4">
                                     <div className="eyebrow mb-1">Missing Documents</div>
-                                    <div className="kpi-value text-amber-600">{req.missingDocs ?? 1}</div>
+                                    <div className="kpi-value text-amber-600">{req.missingDocs ?? (req.token ? "—" : 1)}</div>
                                   </div>
                                 </div>
+                                {req.clientNotes && (
+                                  <div className="px-5 py-3 border-b border-line">
+                                    <div className="eyebrow mb-1">Client Notes</div>
+                                    <p className="text-sm text-ink whitespace-pre-line">{req.clientNotes}</p>
+                                  </div>
+                                )}
+                                {req.token && <RequestLinkRow token={req.token} uploads={req.uploads?.length ?? 0} />}
                               </>
                             )}
                           </div>
@@ -1231,16 +1451,18 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                       })}
                     </div>
 
-                    {/* In the response-received state: Create Additional Request (left) + Upload (right), equal halves. */}
-                    <div className={`grid gap-6 items-start ${intakeResponseReceived ? "grid-cols-1 md:grid-cols-2" : "grid-cols-1"}`}>
-                    {intakeResponseReceived && (() => {
+                    {/* Once a request is sent — or completed — Create Additional Request
+                        runs full width, with the two upload cards side by side beneath. */}
+                    {(intakeSent || intakeResponseReceived) && (() => {
                       const disableAdditional = intakeRequests.some((r) => r.id !== "REQ-001");
                       return (
-                        <div className="lg-card p-6">
-                          <h3 className="card-title mb-2">Create Additional Request</h3>
-                          <p className="secondary-text mb-4">
-                            Send another document request to the plaintiff for additional records.
-                          </p>
+                        <div className="lg-card p-6 flex items-center justify-between gap-6 flex-wrap">
+                          <div className="min-w-0">
+                            <h3 className="card-title mb-2">Create Additional Request</h3>
+                            <p className="secondary-text">
+                              Send another document request to the plaintiff for additional records.
+                            </p>
+                          </div>
                           <button
                             onClick={handleOpenAdditionalRequest}
                             disabled={disableAdditional}
@@ -1254,6 +1476,7 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                       );
                     })()}
 
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
                     {/* Attorney Upload Section */}
                     <div className="lg-card p-6">
                       <h3 className="card-title mb-2">Upload Existing Files</h3>
@@ -1306,6 +1529,7 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                         Upload Files
                       </button>
                     </div>
+                    {mediaCard("panel")}
                     </div>
                   </>
                 )}
@@ -1389,7 +1613,7 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                 {/* Documents Sub-Tabs */}
                 <div>
                   <div className="flex items-center gap-1 mb-4">
-                    {([["intake", "Case evidence"], ["retainer", "Retainer documents"]] as const).map(([val, label]) => (
+                    {([["intake", "Case evidence"], ["retainer", "Retainer documents"], ["media", "Media evidence"]] as const).map(([val, label]) => (
                       <button
                         key={val}
                         onClick={() => setDocumentsSubTab(val)}
@@ -1405,7 +1629,9 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                   </div>
 
                   <div>
-                    {documentsSubTab === "retainer" ? (
+                    {documentsSubTab === "media" ? (
+                      <MediaEvidencePanel caseId={data.caseId} onUpload={openMediaUpload} />
+                    ) : documentsSubTab === "retainer" ? (
                       retainerStatus !== "signed" ? (
                         <div className="flex flex-col items-center justify-center py-12 text-center">
                           <FileText className="w-8 h-8 text-[#9BDAEC] mb-3" strokeWidth={1.75} />
@@ -1605,6 +1831,15 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
       </div>{/* end page container */}
 
       {/* Intake Form Modal */}
+      {/* Upload Video & Photos — one modal for every entry point */}
+      <VideoPhotoUploadModal
+        open={mediaModalOpen}
+        caseId={data.caseId}
+        uploadedBy={INTAKE_SENDER.name}
+        onClose={() => setMediaModalOpen(false)}
+        onViewMedia={viewMediaEvidence}
+      />
+
       {showIntakeModal && (
         <div className="fixed inset-0 bg-ink/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-sm">
@@ -1764,6 +1999,45 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                 </div>
               </div>
 
+              {/* Video & Photos — optional; each ticked kind gets its own upload area on the link */}
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="card-title">Video &amp; Photos</h3>
+                  <span className="text-sm text-[#5B6B78]">(optional)</span>
+                  <NewBadge />
+                </div>
+                <p className="secondary-text mb-4">
+                  Tick what you want the client to send. The link will show a separate upload area for each, and the message below is updated to ask for them. The client can add as many videos as they have, several sets of photos and several scans.
+                </p>
+                <div className="space-y-2.5">
+                  {MEDIA_OPTIONS.map((o) => {
+                    const on = requestedMedia[o.key];
+                    const Icon = MEDIA_ICON[o.key];
+                    return (
+                      <button
+                        key={o.key}
+                        type="button"
+                        role="checkbox"
+                        aria-checked={on}
+                        onClick={() => setRequestedMedia((m) => ({ ...m, [o.key]: !m[o.key] }))}
+                        className={`w-full flex items-start gap-3 rounded-xl border px-4 py-3 text-left transition-colors ${
+                          on ? "border-brand bg-tint" : "border-line bg-white hover:border-soft"
+                        }`}
+                      >
+                        <span className={`mt-0.5 w-5 h-5 rounded border flex items-center justify-center shrink-0 transition-all ${on ? "bg-brand border-brand" : "bg-white border-line"}`}>
+                          {on && <Check className="w-3 h-3 text-white" strokeWidth={1.75} />}
+                        </span>
+                        <Icon className="w-4 h-4 text-deep shrink-0 mt-0.5" strokeWidth={1.75} />
+                        <span className="min-w-0">
+                          <span className={`block text-sm font-medium ${on ? "text-ink" : "text-ink"}`}>{o.title}</span>
+                          <span className="block text-xs text-[#5B6B78] mt-0.5">{o.description}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               {/* Additional Instructions */}
               <div>
                 <h3 className="card-title mb-4">Additional Instructions</h3>
@@ -1775,6 +2049,21 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                   className="w-full bg-white border border-line rounded-lg px-4 py-3 text-sm text-ink placeholder:text-[#5B6B78] focus:outline-none focus:border-brand resize-none transition-all"
                 />
               </div>
+
+              {/* Message Preview — exactly what the client's link will say */}
+              <div>
+                <h3 className="card-title mb-4">Message Preview</h3>
+                <div className="lg-zone lg-zone-grey p-4 text-sm text-ink leading-relaxed whitespace-pre-line">
+                  {intakeMessageText({
+                    plaintiff: data.plaintiff,
+                    senderName: INTAKE_SENDER.name,
+                    senderFirm: INTAKE_SENDER.firm,
+                    docs: intakeModalMode === "additional" ? ADDITIONAL_DOCS : documents.filter((d) => d.enabled).map((d) => d.name),
+                    media: requestedMedia,
+                    instructions: additionalInstructions,
+                  })}
+                </div>
+              </div>
             </div>
 
             <div className="sticky bottom-0 bg-white border-t border-line px-6 py-4 rounded-b-xl flex items-center justify-end gap-3">
@@ -1784,11 +2073,6 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
               >
                 Cancel
               </button>
-              {intakeModalMode === "create" && (
-                <button onClick={handleCreateForm} className="px-4 py-2 bg-white border border-line text-ink rounded-lg text-sm font-medium hover:bg-wash transition-all">
-                  Create Form
-                </button>
-              )}
               <Button
                 onClick={handleSendRequest}
                 disabled={!hasContact}
