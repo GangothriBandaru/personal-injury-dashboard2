@@ -11,11 +11,11 @@ import {
   type IntakeRequest, type UploadedDocument,
 } from "../intake/intakeRequestStore";
 import { RequestLinkRow } from "../intake/RequestLinkRow";
-import { Camera } from "lucide-react";
-import { VideoPhotoUploadModal } from "../intake/VideoPhotoUploadModal";
+import { Camera, Loader2 } from "lucide-react";
+import { VideoPhotoUploadModal, type MediaUploadResult } from "../intake/VideoPhotoUploadModal";
 import { MediaEvidencePanel } from "../intake/MediaEvidencePanel";
 import { useMediaEvidence } from "../intake/mediaEvidenceStore";
-import { MEDIA_OPTIONS, NO_MEDIA, intakeMessageText, type RequestedMedia } from "../intake/intakeMessage";
+import { MEDIA_OPTIONS, NO_MEDIA, intakeMessageText, selectedMediaOptions, type RequestedMedia } from "../intake/intakeMessage";
 import { Video as VideoIcon, ScanLine } from "lucide-react";
 
 // The documents an additional request asks for (unchanged from before).
@@ -264,6 +264,10 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
     uploads?: UploadedDocument[];
     /** The notes from the client's latest submission, if they wrote any. */
     clientNotes?: string;
+    /** The video & photos this request asked for. */
+    requestedMedia?: RequestedMedia;
+    /** When it was last sent (ISO), for the date and time on the card. */
+    lastSentAt?: string;
   }
   const toRecord = (r: IntakeRequest): IntakeRequestRecord => ({
     id: r.id,
@@ -280,6 +284,8 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
     missingDocs: r.missingDocs,
     uploads: r.uploads,
     clientNotes: [...(r.submissions ?? [])].reverse().find((s) => s.notes)?.notes,
+    requestedMedia: r.requestedMedia,
+    lastSentAt: r.lastSentAt,
   });
   const intakeRequests: IntakeRequestRecord[] = storedRequests.map(toRecord);
   const tokenOf = (id: string) => storedRequests.find((r) => r.id === id)?.token;
@@ -626,6 +632,50 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
   const openMediaUpload = () => { setUploadMenuOpen(false); setMediaModalOpen(true); };
   const openDocumentUpload = () => { setUploadMenuOpen(false); docInputRef.current?.click(); };
   const viewMediaEvidence = () => { setDocumentsSubTab("media"); setActiveTab("documents"); };
+  // What the attorney's last video & photo upload actually put on the case.
+  const [mediaUploadResult, setMediaUploadResult] = useState<MediaUploadResult | null>(null);
+  // "Oct 9, 2026 · 6:15 PM"
+  const sentLabel = (iso: string) => {
+    const d = new Date(iso);
+    return `${d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} · ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
+  };
+  // Which document categories satisfy each requested document type.
+  const REQUESTED_DOC_CATEGORIES: Record<string, string[]> = {
+    "Medical Records": ["Medical Records"],
+    "Police Report": ["Police Reports"],
+    "Insurance Documents": ["Insurance Documents"],
+    "Wage Loss Records": ["Wage Loss Records"],
+    "Employment Records": ["Wage Loss Records"],
+    "Pharmacy Records": ["Medical Records"],
+    "Property Damage Photos": ["Photos & Evidence", "Video & Photos"],
+  };
+  // The client's answer to one request, from its own records: the documents
+  // it sent, the requested types none of them covers, and the submission.
+  const answerFor = (req: IntakeRequestRecord) => {
+    const stored = storedRequests.find((r) => r.id === req.id);
+    if (stored?.submissions?.length) {
+      const sentIds = new Set(stored.submissions.flatMap((x) => x.documentIds));
+      const docs = stored.uploads.filter((u) => sentIds.has(u.id)).map((u) => u.name);
+      const covered = new Set(classifyDocuments(docs.map((n) => ({ id: n, name: n, source: "Plaintiff" as const, date: "", status: "Processed" as const }))).map((c) => c.name));
+      const missing = stored.requestedDocs.filter((d) => !(REQUESTED_DOC_CATEGORIES[d] ?? []).some((c) => covered.has(c)));
+      const last = stored.submissions[stored.submissions.length - 1];
+      return { docs, missing, submittedAt: last.submittedAt, notes: req.clientNotes, confirmed: last.confirmationAccepted };
+    }
+    // Answered before submissions were recorded (the sample cases): the
+    // case's own documents and its missing-evidence check.
+    return { docs: sharedDocs.map((d) => d.name), missing: missingEvidence.map((m) => m.title), submittedAt: undefined as string | undefined, notes: undefined as string | undefined, confirmed: undefined as boolean | undefined };
+  };
+  // The video & photos a client sent through one request, from the media records.
+  const receivedMediaFor = (requestId: string) => {
+    const videos = media.videos.filter((v) => v.source === "Client" && v.requestId === requestId);
+    const sets = media.sets.filter((x) => x.source === "Client" && x.requestId === requestId);
+    const photos = sets.reduce((n, x) => n + x.files.length, 0);
+    // Processing only while a linked file actually reports it — never assumed.
+    const processing =
+      videos.some((v) => v.file.analysisStatus === "processing") ||
+      sets.some((x) => x.files.some((f) => f.analysisStatus === "processing"));
+    return { videos: videos.length, sets: sets.length, photos, files: videos.length + photos, processing };
+  };
 
   // The Upload Video & Photos card — one card, two sizes: a tile beside the
   // intake cards before any request exists, a panel beside Upload Existing
@@ -634,7 +684,7 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
   const mediaFeedback = mediaFileCount > 0 && (
     <p className="text-xs text-ink" onClick={(e) => e.stopPropagation()}>
       <span className="font-semibold">{media.videos.length} {media.videos.length === 1 ? "video" : "videos"} · {media.sets.length} {media.sets.length === 1 ? "set" : "sets"}</span> on this case.{" "}
-      <button onClick={viewMediaEvidence} className="font-semibold text-deep hover:underline">View media evidence →</button>
+      <button onClick={viewMediaEvidence} className="text-xs font-semibold text-deep hover:underline">View media evidence →</button>
     </p>
   );
   const mediaCard = (variant: "tile" | "panel") =>
@@ -1318,132 +1368,157 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                   </>
                 ) : (
 <>
-                    <div className="space-y-4">
+                    <div className="space-y-6">
                       {(intakeRequests.length > 0 ? intakeRequests : [buildNewRequest(intakeAlreadySent ? { id: "REQ-001", status: "Completed", docsReceived: 8, missingDocs: 1 } : { id: "REQ-001", status: intakeSent ? "Sent" : "Draft" as any })]).map((req) => {
-                        const isCompleted = req.status === "Completed";
-                        const isSent = ["Sent", "Draft", "Opened", "In Progress", "Partially Completed"].includes(req.status);
+                        // A request the client has answered keeps its sent card,
+                        // with the answer shown beneath it.
+                        const answered = req.status === "Completed";
+                        const sentStatus = answered ? "Sent" : req.status;
                         const statusColors: Record<string, string> = {
                           Draft: "pill pill-neutral",
                           Sent: "pill pill-progress",
                           Opened: "pill pill-progress",
                           "In Progress": "pill pill-progress",
                           "Partially Completed": "pill pill-progress",
-                          Completed: "pill pill-complete",
                           Expired: "pill pill-risk",
                           Cancelled: "pill pill-neutral",
                         };
+                        const asked = selectedMediaOptions(req.requestedMedia);
+                        const got = receivedMediaFor(req.id);
+                        const showMediaReceived = asked.length > 0 || got.files > 0;
+                        const answer = answered ? answerFor(req) : null;
 
                         return (
-                          <div key={req.id} className="bg-white border border-line rounded-xl overflow-hidden" onClick={() => intakeOverflowOpen && setIntakeOverflowOpen(null)}>
+                          <div key={req.id} className="space-y-3" onClick={() => intakeOverflowOpen && setIntakeOverflowOpen(null)}>
+                            <div className="eyebrow">{answered ? "1 · Request sent" : "1 · Request sent, waiting for the client"}</div>
 
-                            {/* Card header */}
-                            <div className="flex items-center justify-between px-5 py-3 bg-white border-b border-line">
-                              <div className="flex items-center gap-2.5">
-                                <span className="mono-ref font-bold">{req.id}</span>
-                                {req.version > 1 && <span className="text-xs text-[#5B6B78] bg-white border border-line px-1.5 py-0.5 rounded font-mono">v{req.version}</span>}
-                                {!isCompleted && (
-                                  <span className={`inline-flex items-center gap-1 ${statusColors[req.status] ?? "pill pill-neutral"}`}>
+                            {/* ── SENT REQUEST CARD ── */}
+                            <div className="bg-white border border-line rounded-xl overflow-hidden">
+                              <div className="flex items-center justify-between gap-3 flex-wrap px-5 py-3 bg-white border-b border-line">
+                                <div className="flex items-center gap-2.5">
+                                  <span className="mono-ref font-bold">{req.id}</span>
+                                  {req.version > 1 && <span className="text-xs text-[#5B6B78] bg-white border border-line px-1.5 py-0.5 rounded font-mono">v{req.version}</span>}
+                                  <span className={`inline-flex items-center gap-1 ${statusColors[sentStatus] ?? "pill pill-neutral"}`}>
                                     <Clock className="w-3 h-3" strokeWidth={1.75} />
-                                    {req.status}
+                                    {sentStatus}
                                   </span>
-                                )}
+                                </div>
+                                <div className="flex items-center gap-3 flex-wrap">
+                                  <span className="mono-ref">{req.lastSentAt ? sentLabel(req.lastSentAt) : req.lastSent}</span>
+                                  <button onClick={() => handleModifyRequest(req.id)} className="flex items-center gap-1.5 px-3.5 py-1.5 bg-white border border-line text-ink rounded-lg text-sm font-medium hover:bg-wash transition-all">
+                                    <Pencil className="w-3.5 h-3.5" strokeWidth={1.75} /> Modify Request
+                                  </button>
+                                  <button onClick={() => handleOpenResend(req.id)} className="flex items-center gap-1.5 px-3.5 py-1.5 bg-white border border-line text-ink rounded-lg text-sm font-medium hover:bg-wash transition-all">
+                                    <RefreshCw className="w-3.5 h-3.5" strokeWidth={1.75} /> Resend
+                                  </button>
+                                </div>
                               </div>
-                              <div className="flex items-center gap-3">
-                                {isCompleted ? (
-                                  <>
-                                    <span className={`inline-flex items-center gap-1 ${statusColors[req.status] ?? "pill pill-neutral"}`}>
-                                      <CheckCircle className="w-3 h-3" strokeWidth={1.75} />
-                                      {req.status}
-                                    </span>
-                                    <button
-                                      onClick={() => {
-                                        // Redirect to the Documents → Case Evidence tab instead of opening the modal.
-                                        setDocumentsSubTab("intake");
-                                        setActiveTab("documents");
-                                        setTimeout(() => {
-                                          document.getElementById("workspace-tabs")?.scrollIntoView({ behavior: "smooth", block: "start" });
-                                        }, 50);
-                                      }}
-                                      className="flex items-center gap-1.5 px-3.5 py-1.5 bg-brand hover:bg-deep text-white rounded-lg text-sm font-semibold transition-all"
-                                    >
-                                      <Eye className="w-3.5 h-3.5" strokeWidth={1.75} /> View Submission
-                                    </button>
-                                  </>
-                                ) : isSent ? (
-                                  <>
-                                    <span className="mono-ref">{req.lastSent}</span>
-                                    <button onClick={() => handleModifyRequest(req.id)} className="flex items-center gap-1.5 px-3.5 py-1.5 bg-white border border-line text-ink rounded-lg text-sm font-medium hover:bg-wash transition-all">
-                                      <Pencil className="w-3.5 h-3.5" strokeWidth={1.75} /> Modify Request
-                                    </button>
-                                    <button onClick={() => handleOpenResend(req.id)} className="flex items-center gap-1.5 px-3.5 py-1.5 bg-white border border-line text-ink rounded-lg text-sm font-medium hover:bg-wash transition-all">
-                                      <RefreshCw className="w-3.5 h-3.5" strokeWidth={1.75} /> Resend
-                                    </button>
-                                  </>
-                                ) : (
-                                  <span className="mono-ref">{req.lastSent}</span>
-                                )}
-                              </div>
-                            </div>
-
-                            {isSent ? (
-                              /* ── SENT STATE ── */
-                              <>
-                                <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-line border-b border-line">
-                                  <div className="px-5 py-4">
-                                    <div className="eyebrow mb-1">Recipient</div>
-                                    <div className="text-sm font-semibold text-ink truncate">{req.recipient}</div>
+                              <div className={`grid grid-cols-2 divide-x divide-line border-b border-line ${asked.length ? "md:grid-cols-3 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,1.4fr)]" : "md:grid-cols-4"}`}>
+                                <div className="px-5 py-4">
+                                  <div className="eyebrow mb-1">Recipient</div>
+                                  <div className="text-sm font-semibold text-ink truncate">{req.recipient}</div>
+                                </div>
+                                <div className="px-5 py-4">
+                                  <div className="eyebrow mb-1">Delivery</div>
+                                  <div className="text-sm font-semibold text-ink">{req.deliveryMethod === "sms" ? "SMS" : "Email"}</div>
+                                </div>
+                                <div className="px-5 py-4">
+                                  <div className="eyebrow mb-1">Documents Requested</div>
+                                  <div className="text-sm font-semibold text-ink">{req.requestedDocs.length}</div>
+                                </div>
+                                <div className="px-5 py-4">
+                                  <div className="eyebrow mb-1">Documents</div>
+                                  <div className="space-y-0.5">
+                                    {req.requestedDocs.slice(0, 3).map((d) => <div key={d} className="text-xs text-[#5B6B78] truncate">• {d}</div>)}
+                                    {req.requestedDocs.length > 3 && <div className="text-xs text-[#5B6B78]">+{req.requestedDocs.length - 3} more</div>}
                                   </div>
-                                  <div className="px-5 py-4">
-                                    <div className="eyebrow mb-1">Delivery</div>
-                                    <div className="text-sm font-semibold text-ink capitalize">{req.deliveryMethod}</div>
-                                  </div>
-                                  <div className="px-5 py-4">
-                                    <div className="eyebrow mb-1">Documents Requested</div>
-                                    <div className="text-sm font-semibold text-ink">{req.requestedDocs.length}</div>
-                                  </div>
-                                  <div className="px-5 py-4">
-                                    <div className="eyebrow mb-1">Documents</div>
+                                </div>
+                                {asked.length > 0 && (
+                                  <div className="px-5 py-4 bg-[#F6FDFF]">
+                                    <div className="eyebrow mb-1 flex items-center gap-1.5 flex-wrap">Video &amp; Photos Requested <NewBadge /></div>
                                     <div className="space-y-0.5">
-                                      {req.requestedDocs.slice(0, 3).map((d) => <div key={d} className="text-xs text-[#5B6B78] truncate">• {d}</div>)}
-                                      {req.requestedDocs.length > 3 && <div className="text-xs text-[#5B6B78]">+{req.requestedDocs.length - 3} more</div>}
+                                      {asked.slice(0, 3).map((o) => <div key={o.key} className="text-xs text-[#5B6B78] break-words">• {o.title}</div>)}
+                                      {asked.length > 3 && <div className="text-xs text-[#5B6B78]">+{asked.length - 3} more</div>}
                                     </div>
                                   </div>
-                                </div>
-                                {req.lastModified && (
-                                  <div className="px-5 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-700">
-                                    Last modified {req.lastModified}
-                                  </div>
                                 )}
-                                {req.token && <RequestLinkRow token={req.token} uploads={req.uploads?.length ?? 0} />}
-                              </>
-                            ) : (
-                              /* ── COMPLETED STATE ── */
+                              </div>
+                              {req.lastModified && (
+                                <div className="px-5 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-700">
+                                  Last modified {req.lastModified}
+                                </div>
+                              )}
+                              {req.token && <RequestLinkRow token={req.token} uploads={(req.uploads?.length ?? 0) + got.files} />}
+                            </div>
+
+                            {/* ── COMPLETED SUBMISSION CARD — the client's answer, no link ── */}
+                            {answer && (
                               <>
-                                <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-line border-b border-line">
-                                  <div className="px-5 py-4">
-                                    <div className="eyebrow mb-1">Status</div>
-                                    <div className="text-sm font-semibold text-ink">Completed</div>
+                                <div className="eyebrow pt-2">2 · Client has answered</div>
+                                <div className="bg-white border border-line rounded-xl overflow-hidden">
+                                  <div className="flex items-center justify-between gap-3 px-5 py-3 bg-white border-b border-line">
+                                    <span className="mono-ref font-bold">{req.id}</span>
+                                    <div className="flex items-center gap-3">
+                                      <span className="inline-flex items-center gap-1 pill pill-complete">
+                                        <CheckCircle className="w-3 h-3" strokeWidth={1.75} /> Completed
+                                      </span>
+                                      <button
+                                        onClick={() => { setViewingSubmissionId(req.id); setShowViewSubmissionModal(true); }}
+                                        className="flex items-center gap-1.5 px-3.5 py-1.5 bg-brand hover:bg-deep text-white rounded-lg text-sm font-semibold transition-all"
+                                      >
+                                        <Eye className="w-3.5 h-3.5" strokeWidth={1.75} /> View Submission
+                                      </button>
+                                    </div>
                                   </div>
-                                  <div className="px-5 py-4">
-                                    <div className="eyebrow mb-1">Recipient</div>
-                                    <div className="text-sm font-semibold text-ink truncate">{req.recipient}</div>
+                                  <div className={`grid grid-cols-2 divide-x divide-line ${showMediaReceived ? "md:grid-cols-3 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.6fr)]" : "md:grid-cols-4"}`}>
+                                    <div className="px-5 py-4">
+                                      <div className="eyebrow mb-1">Status</div>
+                                      <div className="text-sm font-semibold text-ink">Completed</div>
+                                    </div>
+                                    <div className="px-5 py-4">
+                                      <div className="eyebrow mb-1">Recipient</div>
+                                      <div className="text-sm font-semibold text-ink truncate">{req.recipient}</div>
+                                    </div>
+                                    <div className="px-5 py-4">
+                                      <div className="eyebrow mb-1">Documents Received</div>
+                                      <div className="kpi-value">{answer.docs.length}</div>
+                                    </div>
+                                    <div className="px-5 py-4">
+                                      <div className="eyebrow mb-1">Missing Documents</div>
+                                      <div className={`kpi-value ${answer.missing.length ? "text-amber-600" : "text-ink"}`}>{answer.missing.length}</div>
+                                    </div>
+                                    {showMediaReceived && (
+                                      <button
+                                        type="button"
+                                        onClick={viewMediaEvidence}
+                                        disabled={got.files === 0}
+                                        className="px-5 py-4 text-left bg-[#F6FDFF] hover:bg-tint transition-colors disabled:hover:bg-[#F6FDFF] disabled:cursor-default"
+                                        title={got.files > 0 ? "Open Media evidence" : undefined}
+                                      >
+                                        <div className="eyebrow mb-1 flex items-center gap-1.5 flex-wrap">Video &amp; Photos Received <NewBadge /></div>
+                                        <div className="flex items-center gap-2">
+                                          <span className="kpi-value">{got.files > 0 ? got.files : "—"}</span>
+                                          {got.processing && (
+                                            <span className="inline-flex items-center gap-1 text-xs text-[#5B6B78]">
+                                              <Loader2 className="w-3.5 h-3.5 text-brand animate-spin" strokeWidth={1.75} /> Analysing
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div className="text-xs text-[#5B6B78] mt-0.5">
+                                          {got.files > 0
+                                            ? <>{got.videos} {got.videos === 1 ? "video" : "videos"} · {got.sets} photo {got.sets === 1 ? "set" : "sets"} ({got.photos} {got.photos === 1 ? "photo" : "photos"}) · <span className="font-semibold text-deep">opens Media evidence</span></>
+                                            : "Requested — none received yet"}
+                                        </div>
+                                      </button>
+                                    )}
                                   </div>
-                                  <div className="px-5 py-4">
-                                    <div className="eyebrow mb-1">Documents Received</div>
-                                    <div className="kpi-value">{req.docsReceived ?? 8}</div>
-                                  </div>
-                                  <div className="px-5 py-4">
-                                    <div className="eyebrow mb-1">Missing Documents</div>
-                                    <div className="kpi-value text-amber-600">{req.missingDocs ?? (req.token ? "—" : 1)}</div>
-                                  </div>
+                                  {req.clientNotes && (
+                                    <div className="px-5 py-3 border-t border-line">
+                                      <div className="eyebrow mb-1">Client Notes</div>
+                                      <p className="text-sm text-ink whitespace-pre-line">{req.clientNotes}</p>
+                                    </div>
+                                  )}
                                 </div>
-                                {req.clientNotes && (
-                                  <div className="px-5 py-3 border-b border-line">
-                                    <div className="eyebrow mb-1">Client Notes</div>
-                                    <p className="text-sm text-ink whitespace-pre-line">{req.clientNotes}</p>
-                                  </div>
-                                )}
-                                {req.token && <RequestLinkRow token={req.token} uploads={req.uploads?.length ?? 0} />}
                               </>
                             )}
                           </div>
@@ -1481,8 +1556,55 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                     <div className="lg-card p-6">
                       <h3 className="card-title mb-2">Upload Existing Files</h3>
                       <p className="secondary-text mb-4">
-                        Add documents already received outside the LECO intake process.
+                        Add documents, video and photos already received outside the LECO intake process.
                       </p>
+
+                      {/* The attorney's last video & photo upload — real results only */}
+                      {mediaUploadResult && (() => {
+                        const vids = mediaUploadResult.uploaded.filter((u): u is { type: "video"; name: string } => u.type === "video");
+                        const sets = mediaUploadResult.uploaded.filter((u): u is { type: "set"; kind: "scene" | "medical"; count: number } => u.type === "set");
+                        const photos = sets.reduce((n, x) => n + x.count, 0);
+                        const files = vids.length + photos;
+                        return (
+                          <div className={`mb-4 rounded-xl p-4 border ${files > 0 ? "bg-green-50 border-green-200" : "bg-[#FEF2F2] border-[#FBD5D5]"}`}>
+                            <div className="flex items-start gap-3">
+                              {files > 0
+                                ? <CheckCircle className="w-5 h-5 text-green-600 shrink-0 mt-0.5" strokeWidth={1.75} />
+                                : <AlertCircle className="w-5 h-5 text-[#B91C1C] shrink-0 mt-0.5" strokeWidth={1.75} />}
+                              <div className="flex-1 min-w-0">
+                                {files > 0 && (
+                                  <>
+                                    <p className="text-sm font-semibold text-green-800 mb-1">
+                                      {files} {files === 1 ? "file" : "files"} uploaded successfully
+                                    </p>
+                                    <ul className="space-y-0.5">
+                                      {vids.map((v) => <li key={v.name} className="text-xs text-green-700 font-mono truncate">{v.name}</li>)}
+                                      {sets.length > 0 && (
+                                        <li className="text-xs text-green-700">
+                                          {sets.length} photo {sets.length === 1 ? "set" : "sets"} ({photos} {photos === 1 ? "photo" : "photos"})
+                                        </li>
+                                      )}
+                                    </ul>
+                                  </>
+                                )}
+                                {mediaUploadResult.failed > 0 && (
+                                  <p className={`text-xs font-medium ${files > 0 ? "text-[#B91C1C] mt-1" : "text-sm font-semibold text-[#B91C1C]"}`}>
+                                    {mediaUploadResult.failed} {mediaUploadResult.failed === 1 ? "item" : "items"} could not be uploaded and {mediaUploadResult.failed === 1 ? "was" : "were"} not added.
+                                  </p>
+                                )}
+                                {files > 0 && (
+                                  <button onClick={viewMediaEvidence} className="mt-2 text-xs font-medium text-green-700 underline hover:text-green-900 transition-colors">
+                                    View in Media evidence tab →
+                                  </button>
+                                )}
+                              </div>
+                              <button onClick={() => setMediaUploadResult(null)} aria-label="Dismiss" className="text-green-400 hover:text-green-600 transition-colors">
+                                <X className="w-4 h-4" strokeWidth={1.75} />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })()}
 
                       {showUploadSuccess && (
                         <div className="mb-4 bg-green-50 border border-green-200 rounded-xl p-4">
@@ -1521,13 +1643,22 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                         className="hidden"
                         onChange={handleFileInputChange}
                       />
-                      <button
-                        onClick={() => fileInputRef.current?.click()}
-                        className="flex items-center gap-2 px-4 py-2 bg-white border border-line text-deep rounded-lg text-sm font-medium hover:bg-wash transition-all"
-                      >
-                        <Upload className="w-4 h-4" strokeWidth={1.75} />
-                        Upload Files
-                      </button>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                          onClick={() => fileInputRef.current?.click()}
+                          className="flex items-center gap-2 px-4 py-2 bg-white border border-line text-deep rounded-lg text-sm font-medium hover:bg-wash transition-all"
+                        >
+                          <Upload className="w-4 h-4" strokeWidth={1.75} />
+                          Upload Documents
+                        </button>
+                        <button
+                          onClick={openMediaUpload}
+                          className="flex items-center gap-2 px-4 py-2 bg-white border border-line text-deep rounded-lg text-sm font-medium hover:bg-wash transition-all"
+                        >
+                          <Camera className="w-4 h-4" strokeWidth={1.75} />
+                          Upload Video &amp; Photos
+                        </button>
+                      </div>
                     </div>
                     {mediaCard("panel")}
                     </div>
@@ -1617,20 +1748,21 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                       <button
                         key={val}
                         onClick={() => setDocumentsSubTab(val)}
-                        className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                        className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                           documentsSubTab === val
                             ? "bg-tint text-deep"
                             : "text-[#5B6B78] hover:text-ink hover:bg-wash"
                         }`}
                       >
                         {label}
+                        {val === "media" && <NewBadge />}
                       </button>
                     ))}
                   </div>
 
                   <div>
                     {documentsSubTab === "media" ? (
-                      <MediaEvidencePanel caseId={data.caseId} onUpload={openMediaUpload} />
+                      <MediaEvidencePanel caseId={data.caseId} documents={sharedDocs} onUpload={openMediaUpload} />
                     ) : documentsSubTab === "retainer" ? (
                       retainerStatus !== "signed" ? (
                         <div className="flex flex-col items-center justify-center py-12 text-center">
@@ -1838,6 +1970,7 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
         uploadedBy={INTAKE_SENDER.name}
         onClose={() => setMediaModalOpen(false)}
         onViewMedia={viewMediaEvidence}
+        onUploaded={setMediaUploadResult}
       />
 
       {showIntakeModal && (
@@ -2121,15 +2254,22 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
 
       {/* View Submission Modal */}
       {showViewSubmissionModal && (() => {
+        // The answer to exactly this request, from its own records.
         const req = intakeRequests.find((r) => r.id === viewingSubmissionId);
-        const submittedDocs = ["MRI_Report_2026.pdf", "ER_Bills.pdf", "hospital_medical_records.pdf", "police_report_final.pdf", "physical_therapy_notes.pdf", "insurance_policy_v2.pdf", "witness_statement.pdf", "wage_loss_statement.pdf"];
+        if (!req) return null;
+        const answer = answerFor(req);
+        const got = receivedMediaFor(req.id);
+        const requested = req.requestedDocs.length;
+        const completion = requested > 0 ? Math.round(((requested - Math.min(answer.missing.length, requested)) / requested) * 100) : 100;
         return (
           <div className="fixed inset-0 bg-ink/40 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-xl w-full max-w-2xl shadow-sm overflow-hidden max-h-[90vh] flex flex-col">
               <div className="flex items-center justify-between px-6 py-5 border-b border-line shrink-0">
                 <div>
                   <h2 className="card-title">Submission Details</h2>
-                  <p className="mono-ref mt-0.5">{req?.id} · Submitted Jun 12, 2026</p>
+                  <p className="mono-ref mt-0.5">
+                    {req.id} · {answer.submittedAt ? `Submitted ${sentLabel(answer.submittedAt)}` : "Submission date not on record"}
+                  </p>
                 </div>
                 <button onClick={() => setShowViewSubmissionModal(false)} className="p-1.5 hover:bg-tint rounded-lg transition-colors">
                   <X className="w-4 h-4 text-[#5B6B78]" strokeWidth={1.75} />
@@ -2137,7 +2277,11 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
               </div>
               <div className="flex-1 overflow-auto p-6 space-y-5">
                 <div className="grid grid-cols-3 gap-4">
-                  {[{ label: "Documents Received", value: "8", color: "text-ink" }, { label: "Missing Documents", value: "1", color: "text-amber-600" }, { label: "Completion", value: "100%", color: "text-green-600" }].map(({ label, value, color }) => (
+                  {[
+                    { label: "Documents Received", value: String(answer.docs.length), color: "text-ink" },
+                    { label: "Missing Documents", value: String(answer.missing.length), color: answer.missing.length ? "text-amber-600" : "text-ink" },
+                    { label: "Completion", value: `${completion}%`, color: completion === 100 ? "text-green-600" : "text-amber-600" },
+                  ].map(({ label, value, color }) => (
                     <div key={label} className="bg-wash border border-line rounded-xl p-4 text-center">
                       <div className={`kpi-value ${color} mb-1`}>{value}</div>
                       <div className="text-xs text-[#5B6B78]">{label}</div>
@@ -2146,23 +2290,53 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                 </div>
                 <div>
                   <h3 className="text-sm font-semibold text-ink mb-3">Received Documents</h3>
-                  <div className="border border-line rounded-xl divide-y divide-line">
-                    {submittedDocs.map((doc) => (
-                      <div key={doc} className="flex items-center justify-between px-4 py-3">
-                        <div className="flex items-center gap-2.5">
-                          <FileTypeIcon name={doc} className="w-4 h-4 text-[#5B6B78] shrink-0" />
-                          <span className="mono-ref text-ink">{doc}</span>
-                          <FileTypeTag name={doc} />
+                  {answer.docs.length > 0 ? (
+                    <div className="border border-line rounded-xl divide-y divide-line">
+                      {answer.docs.map((doc) => (
+                        <div key={doc} className="flex items-center justify-between px-4 py-3">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <FileTypeIcon name={doc} className="w-4 h-4 text-[#5B6B78] shrink-0" />
+                            <span className="mono-ref text-ink truncate">{doc}</span>
+                            <FileTypeTag name={doc} />
+                          </div>
+                          <CheckCircle className="w-4 h-4 text-green-500 shrink-0" strokeWidth={1.75} />
                         </div>
-                        <CheckCircle className="w-4 h-4 text-green-500 shrink-0" strokeWidth={1.75} />
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  ) : <p className="secondary-text">No documents were sent with this submission.</p>}
                 </div>
+                {answer.missing.length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-semibold text-ink mb-2">Still Missing</h3>
+                    <ul className="space-y-1">
+                      {answer.missing.map((m) => <li key={m} className="text-sm text-amber-700">• {m}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {got.files > 0 && (
+                  <div>
+                    <h3 className="text-sm font-semibold text-ink mb-2">Video &amp; Photos</h3>
+                    <p className="secondary-text">
+                      {got.videos} {got.videos === 1 ? "video" : "videos"} · {got.sets} photo {got.sets === 1 ? "set" : "sets"} ({got.photos} {got.photos === 1 ? "photo" : "photos"}){" "}
+                      <button onClick={() => { setShowViewSubmissionModal(false); viewMediaEvidence(); }} className="font-semibold text-deep hover:underline">View in Media evidence →</button>
+                    </p>
+                  </div>
+                )}
+                {answer.notes && (
+                  <div>
+                    <h3 className="text-sm font-semibold text-ink mb-2">Client Notes</h3>
+                    <p className="text-sm text-ink whitespace-pre-line">{answer.notes}</p>
+                  </div>
+                )}
+                {answer.confirmed && (
+                  <p className="text-xs text-[#5B6B78] flex items-center gap-1.5">
+                    <CheckCircle className="w-3.5 h-3.5 text-green-600" strokeWidth={1.75} /> The client confirmed the documents are accurate and relevant to their case.
+                  </p>
+                )}
               </div>
               <div className="flex justify-end gap-2 px-6 py-4 bg-wash border-t border-line shrink-0">
                 <button onClick={() => setShowViewSubmissionModal(false)} className="px-4 py-2 bg-white border border-line text-ink rounded-lg text-sm font-medium hover:bg-wash transition-all">Close</button>
-                <button onClick={handleOpenAdditionalRequest} className="px-4 py-2 bg-brand text-white rounded-lg text-sm font-medium hover:bg-deep transition-all flex items-center gap-1.5">
+                <button onClick={() => { setShowViewSubmissionModal(false); handleOpenAdditionalRequest(); }} className="px-4 py-2 bg-brand text-white rounded-lg text-sm font-medium hover:bg-deep transition-all flex items-center gap-1.5">
                   <Plus className="w-3.5 h-3.5" strokeWidth={1.75} /> Create Additional Request
                 </button>
               </div>

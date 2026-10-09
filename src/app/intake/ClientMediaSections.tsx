@@ -1,6 +1,6 @@
 import { Video, Camera, ScanLine, Image as ImageIcon, Plus } from "lucide-react";
 import {
-  DropZone, FileRow, Banner, StudyFields, problemWith, toDrafts, keyOf, EMPTY_STUDY,
+  DropZone, FileRow, Banner, StudyFields, problemWith, toDrafts, keyOf, EMPTY_STUDY, storeDraft,
   type Draft, type DraftSet, type Places,
 } from "./mediaUploadParts";
 import { addVideoEvidence, addPhotoSetEvidence, type SetKind } from "./mediaEvidenceStore";
@@ -43,29 +43,29 @@ export function clientMediaStats(d: ClientMediaDraft, requested: RequestedMedia)
 
 /** Uploads every video and every non-empty set on its own. Items that fail stay
  *  in the draft for another try; the rest are recorded against the request. */
-export function uploadClientMedia(
+export async function uploadClientMedia(
   d: ClientMediaDraft, requested: RequestedMedia, caseId: string, requestId: string, uploadedBy: string,
-): { videoIds: string[]; setIds: string[]; remaining: ClientMediaDraft } {
+): Promise<{ videoIds: string[]; setIds: string[]; remaining: ClientMediaDraft }> {
   const origin = { source: "Client" as const, requestId };
   const videoIds: string[] = [];
   const setIds: string[] = [];
   const keepVideos: Draft[] = [];
   for (const v of requested.videos ? d.videos : []) {
-    try { videoIds.push(addVideoEvidence(caseId, { name: v.name, size: v.size, type: v.type }, uploadedBy, origin).id); }
+    try { videoIds.push(addVideoEvidence(caseId, await storeDraft(v), uploadedBy, origin).id); }
     catch { keepVideos.push(v); }
   }
-  const sendSets = (sets: DraftSet[], on: boolean) => {
+  const sendSets = async (sets: DraftSet[], on: boolean) => {
     const keep: DraftSet[] = [];
     for (const s of on ? sets : []) {
       if (s.files.length === 0) continue;
       try {
-        setIds.push(addPhotoSetEvidence(caseId, s.kind, s.files.map((f) => ({ name: f.name, size: f.size, type: f.type })), uploadedBy, s.kind === "medical" ? s.study : undefined, origin).id);
+        setIds.push(addPhotoSetEvidence(caseId, s.kind, await Promise.all(s.files.map(storeDraft)), uploadedBy, s.kind === "medical" ? s.study : undefined, origin).id);
       } catch { keep.push(s); }
     }
     return keep;
   };
-  const keepScene = sendSets(d.scene, requested.scenePhotos);
-  const keepMedical = sendSets(d.medical, requested.medicalImages);
+  const keepScene = await sendSets(d.scene, requested.scenePhotos);
+  const keepMedical = await sendSets(d.medical, requested.medicalImages);
   return {
     videoIds,
     setIds,

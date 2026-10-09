@@ -13,6 +13,7 @@ import {
   CaseDocument, classifyDocuments, generateAnalysisFindings, AnalysisFinding,
 } from "../types/case";
 import { VIOLATION_CARDS, VIOLATION_SEVERITY_PILL } from "../workspace/WorkspaceTabs";
+import { governingLawSummary } from "../jurisdiction/jurisdictionData";
 
 /* MARKER-MAKE-KIT-INVOKED */
 
@@ -290,14 +291,15 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
   };
 
   // Case Intelligence Summary fields
-  // Jurisdiction opens the Attorney Jurisdiction Review. Governing Law reads
-  // "Any state" until the attorney approves one there.
-  const summaryRows: { icon: any; label: string; value?: string; onClick?: () => void; hint?: string }[] = [
+  // Jurisdiction opens the Attorney Jurisdiction Review. Governing Law shows the
+  // approved law, else the provisional finding — labelled as such.
+  const law = governingLawSummary(data.caseId, data.jurisdiction, governingLaw);
+  const summaryRows: { icon: any; label: string; value?: string; note?: string; onClick?: () => void; hint?: string }[] = [
     { icon: User, label: "Plaintiff", value: data.plaintiff },
     { icon: Building2, label: "Defendant", value: "Memory Care Facility LLC" },
     { icon: Shield, label: "Insurance Carrier", value: "ABC Professional Liability Insurance" },
     { icon: Scale, label: "Jurisdiction", value: data.jurisdiction, onClick: onOpenJurisdiction, hint: "Open the Attorney Jurisdiction Review" },
-    { icon: Gavel, label: "Governing Law", value: governingLaw ?? "Any state" },
+    { icon: Gavel, label: "Governing Law", value: law.value, note: law.note },
   ];
 
   return (
@@ -364,7 +366,7 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              {summaryRows.map(({ icon: Icon, label, value, onClick, hint }) => {
+              {summaryRows.map(({ icon: Icon, label, value, note, onClick, hint }) => {
                 const body = (
                   <>
                     <div className="eyebrow flex items-center gap-1.5 mb-1.5">
@@ -372,6 +374,7 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
                       {label}
                     </div>
                     <p className="text-sm font-semibold text-ink leading-snug">{value}</p>
+                    {note && <p className="text-xs text-[#5B6B78] leading-snug mt-0.5">{note}</p>}
                   </>
                 );
                 return onClick ? (

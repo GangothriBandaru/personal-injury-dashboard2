@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   X, Video, Image as ImageIcon, ScanLine, Camera, Info, AlertCircle, AlertTriangle, CheckCircle,
   Plus, UploadCloud, ArrowRight, Loader2, RotateCcw,
@@ -7,11 +7,16 @@ import {
   addVideoEvidence, addPhotoSetEvidence, type StudyDetails, type MediaFile,
 } from "./mediaEvidenceStore";
 import {
-  DropZone, FileRow, Banner, StudyFields, problemWith, toDrafts, keyOf, EMPTY_STUDY,
+  DropZone, FileRow, Banner, StudyFields, problemWith, toDrafts, keyOf, EMPTY_STUDY, storeDraft,
   type Draft, type DraftSet,
 } from "./mediaUploadParts";
 
-interface Job { key: string; label: string; detail: string; status: "waiting" | "uploading" | "done" | "failed"; run: () => void }
+/** What one finished upload put on the case — reported to the page so it can
+ *  say exactly what arrived. */
+export type MediaUploadItem = { type: "video"; name: string } | { type: "set"; kind: "scene" | "medical"; count: number };
+export interface MediaUploadResult { uploaded: MediaUploadItem[]; failed: number }
+
+interface Job { key: string; label: string; detail: string; status: "waiting" | "uploading" | "done" | "failed"; result: MediaUploadItem; run: () => void }
 
 // ── Upload Video & Photos ────────────────────────────────────────────────────
 // The one media upload, opened from the header Upload ▾ menu and from every
@@ -23,7 +28,7 @@ interface Job { key: string; label: string; detail: string; status: "waiting" | 
 
 
 export function VideoPhotoUploadModal({
-  open, caseId, uploadedBy, onClose, onViewMedia,
+  open, caseId, uploadedBy, onClose, onViewMedia, onUploaded,
 }: {
   open: boolean;
   caseId: string;
@@ -31,11 +36,28 @@ export function VideoPhotoUploadModal({
   onClose: () => void;
   /** Opens the case's Media evidence tab. */
   onViewMedia?: () => void;
+  /** Called when every upload has finished (again after a retry), with what
+   *  actually succeeded and how many failed. */
+  onUploaded?: (result: MediaUploadResult) => void;
 }) {
   const [tab, setTab] = useState<"video" | "photos">("video");
   const [videos, setVideos] = useState<Draft[]>([]);
   const [sets, setSets] = useState<DraftSet[]>([{ key: keyOf(), kind: "scene", files: [], study: EMPTY_STUDY }]);
   const [jobs, setJobs] = useState<Job[] | null>(null);
+
+  // Report real results once all uploads have settled — never before, and
+  // once per settled state (a retry settles it again).
+  const reported = useRef("");
+  useEffect(() => {
+    if (!jobs || !jobs.every((j) => j.status === "done" || j.status === "failed")) return;
+    const signature = jobs.map((j) => `${j.key}:${j.status}`).join("|");
+    if (reported.current === signature) return;
+    reported.current = signature;
+    onUploaded?.({
+      uploaded: jobs.filter((j) => j.status === "done").map((j) => j.result),
+      failed: jobs.filter((j) => j.status === "failed").length,
+    });
+  }, [jobs]);
 
   if (!open) return null;
 
@@ -63,25 +85,28 @@ export function VideoPhotoUploadModal({
   // ── Upload: one job per video, one per photo set ──
   const startUpload = () => {
     if (!canUpload) return;
-    const make = (key: string, labelText: string, detail: string, save: () => void): Job => ({
-      key, label: labelText, detail, status: "waiting",
+    // Each job really stores its files and records them; its status is the
+    // outcome of that work, not a timer.
+    const make = (key: string, labelText: string, detail: string, result: MediaUploadItem, save: () => unknown): Job => ({
+      key, label: labelText, detail, status: "waiting", result,
       run: () => {
         setJobs((js) => js!.map((j) => (j.key === key ? { ...j, status: "uploading" } : j)));
-        window.setTimeout(() => {
-          let ok = true;
-          try { save(); } catch { ok = false; }
-          setJobs((js) => js!.map((j) => (j.key === key ? { ...j, status: ok ? "done" : "failed" } : j)));
-        }, 500 + Math.random() * 400);
+        let ok = true;
+        Promise.resolve()
+          .then(save)
+          .catch(() => { ok = false; })
+          .then(() => setJobs((js) => js!.map((j) => (j.key === key ? { ...j, status: ok ? "done" : "failed" } : j))));
       },
     });
-    const meta = (d: Draft): MediaFile => ({ name: d.name, size: d.size, type: d.type });
+    // Each upload stores its original files, then records them.
     const list: Job[] = [
-      ...videos.map((v, i) => make(v.key, `Video ${i + 1}`, v.name, () => addVideoEvidence(caseId, meta(v), uploadedBy))),
+      ...videos.map((v, i) => make(v.key, `Video ${i + 1}`, v.name, { type: "video", name: v.name }, async () => addVideoEvidence(caseId, await storeDraft(v), uploadedBy, { source: "Attorney" }))),
       ...filledSets.map((s, i) => make(
         s.key,
         `Set ${i + 1} · ${s.kind === "scene" ? "Scene photos" : "Medical images"}`,
         plural(s.files.length, "image"),
-        () => addPhotoSetEvidence(caseId, s.kind, s.files.map(meta), uploadedBy, s.kind === "medical" ? s.study : undefined),
+        { type: "set", kind: s.kind, count: s.files.length },
+        async () => addPhotoSetEvidence(caseId, s.kind, await Promise.all(s.files.map(storeDraft)), uploadedBy, s.kind === "medical" ? s.study : undefined, { source: "Attorney" }),
       )),
     ];
     setJobs(list);

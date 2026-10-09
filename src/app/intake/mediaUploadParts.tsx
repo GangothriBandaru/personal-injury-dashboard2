@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { X, Info, AlertCircle, CheckCircle, UploadCloud } from "lucide-react";
-import type { SetKind, StudyDetails } from "./mediaEvidenceStore";
+import type { SetKind, StudyDetails, MediaFile } from "./mediaEvidenceStore";
+import { putMediaFile } from "./mediaFileStore";
 
 // ── Video & photo upload parts ─────────────────────────────────────────────
 // Shared by the attorney's Upload Video & Photos modal and the client's
@@ -17,7 +18,7 @@ const ANY_IMAGE = ["jpeg", "jpg", "png", "heic", "heif", "webp", "gif", "bmp", "
 
 export type Context = "video" | SetKind;
 
-export interface Draft { key: string; name: string; size: number; type: string }
+export interface Draft { key: string; name: string; size: number; type: string; /** The chosen file itself. */ file?: File }
 export interface DraftSet { key: string; kind: SetKind; files: Draft[]; study: StudyDetails }
 
 export const EMPTY_STUDY: StudyDetails = { scanType: "Not sure", bodyPart: "", view: "", studyDate: "", side: "Not sure" };
@@ -50,7 +51,15 @@ export function problemWith(file: Draft, ctx: Context, places: Places = TAB_PLAC
 }
 
 export const toDrafts = (files: FileList | File[]): Draft[] =>
-  Array.from(files).map((f) => ({ key: keyOf(), name: f.name, size: f.size, type: f.type }));
+  Array.from(files).map((f) => ({ key: keyOf(), name: f.name, size: f.size, type: f.type, file: f }));
+
+/** Stores a draft's original file and returns its record, with the storage
+ *  key. Throws if the file cannot be stored, so that upload fails honestly. */
+export async function storeDraft(d: Draft): Promise<MediaFile> {
+  const meta: MediaFile = { name: d.name, size: d.size, type: d.type };
+  if (!d.file) return meta;
+  return { ...meta, storageKey: await putMediaFile(d.file) };
+}
 
 export function DropZone({ accept, hint, onFiles }: { accept: string; hint: string; onFiles: (files: FileList) => void }) {
   const [over, setOver] = useState(false);

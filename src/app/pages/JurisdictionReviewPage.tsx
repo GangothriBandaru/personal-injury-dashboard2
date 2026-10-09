@@ -80,42 +80,6 @@ function resultOverRange(record: CaseJurisdiction, rule: CandidateForum["applied
   return { barred: false, label: `Barred above ${e.low}%` };
 }
 
-/** The review's progression; the active step follows the decision. */
-function StepTrail({ status }: { status: AttorneyDecision["status"] }) {
-  const steps = [
-    { code: "3A", label: "Jurisdiction" },
-    { code: "3B", label: "Statute of Limitations" },
-    { code: "", label: "Liability Analysis" },
-    { code: "3C", label: "Attorney Decision" },
-    { code: "3D", label: "Rechecks until filing" },
-  ];
-  const active = status === "approved" ? 4 : 3;
-  return (
-    <div className="lg-card px-5 py-4 overflow-x-auto">
-      <ol className="flex items-center gap-2 min-w-max">
-        {steps.map((s, i) => {
-          const done = i < active;
-          const on = i === active;
-          return (
-            <li key={s.label} className="flex items-center gap-2">
-              <span
-                className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium ${
-                  on ? "bg-tint border-brand text-deep" : done ? "bg-white border-line text-ink" : "bg-white border-line text-[#8A98A3]"
-                }`}
-              >
-                {done ? <CheckCircle className="w-4 h-4 text-deep" strokeWidth={1.75} /> : <Circle className={`w-4 h-4 ${on ? "text-deep" : "text-[#C5CFD6]"}`} strokeWidth={1.75} />}
-                {s.code && <span className="mono-ref">{s.code}</span>}
-                {s.label}
-              </span>
-              {i < steps.length - 1 && <ArrowRight className="w-4 h-4 text-[#9BA8B4] shrink-0" strokeWidth={1.75} />}
-            </li>
-          );
-        })}
-      </ol>
-    </div>
-  );
-}
-
 // ── Tab 1 — Forum comparison ─────────────────────────────────────────────────
 
 function ForumComparison({ record }: { record: CaseJurisdiction }) {
@@ -438,11 +402,75 @@ function MissingData({ record }: { record: CaseJurisdiction }) {
   );
 }
 
+// ── Attorney decision guidance ───────────────────────────────────────────────
+// At the top of the page, so the attorney knows from the start that a decision
+// is needed — and where it stands. It points to the one Attorney Decision panel
+// below; it is not a second form.
+
+function DecisionGuidance({ record, decision, onGo }: { record?: CaseJurisdiction; decision: AttorneyDecision; onGo: () => void }) {
+  const working = workingDeadline(record);
+  const finding = record?.governingLaw.finding;
+  const forumTitle = (id: string) => record?.forums.find((f) => f.id === id)?.title ?? id;
+  const cta = (label: string) => (
+    <button onClick={onGo} className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-brand hover:bg-deep text-white rounded-lg text-sm font-semibold transition-colors shrink-0">
+      {label} <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
+    </button>
+  );
+
+  if (decision.status === "approved") {
+    return (
+      <div className="rounded-xl border border-[#D1FADF] bg-[#ECFDF3] px-5 py-4 flex items-start justify-between gap-4 flex-wrap">
+        <div className="flex items-start gap-3 min-w-0">
+          <CheckCircle className="w-5 h-5 text-[#15803D] shrink-0 mt-0.5" strokeWidth={1.75} />
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-ink">Attorney decision recorded</div>
+            <p className="text-sm text-ink mt-0.5">
+              Governing law {decision.governingLaw}. Forums: {decision.forums.map(forumTitle).join(", ") || "none"}. Working deadline {formatDate(working?.iso)} confirmed and calendared.
+            </p>
+            {decision.reviewer && <p className="text-xs text-[#5B6B78] mt-0.5">Reviewer: {decision.reviewer} · {decision.decidedAt}</p>}
+          </div>
+        </div>
+        {cta("View decision")}
+      </div>
+    );
+  }
+
+  const pending = decision.status === "needs-info"
+    ? { title: "More information requested — decision still pending", text: "Follow-up tasks are open. Once the information is in, confirm the governing law, the forums and the working deadline." }
+    : decision.status === "escalated"
+      ? { title: "Escalated to the supervising attorney — decision still pending", text: "The case is waiting on a second review. Nothing has been approved or calendared yet." }
+      : { title: "Attorney decision required", text: "Review the recommended jurisdiction, confirm the governing law, select the forums to plan around, and verify the working statute-of-limitations deadline before approving the case for filing preparation." };
+
+  return (
+    <div className="rounded-xl border border-[#D6F2F7] bg-[#F6FDFF] px-5 py-4 flex items-start justify-between gap-4 flex-wrap">
+      <div className="flex items-start gap-3 min-w-0 flex-1">
+        <div className="w-9 h-9 rounded-lg bg-tint flex items-center justify-center shrink-0">
+          <Gavel className="w-4 h-4 text-deep" strokeWidth={1.75} />
+        </div>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-semibold text-ink">{pending.title}</span>
+            <span className="pill pill-progress">Action required</span>
+          </div>
+          <p className="text-sm text-ink mt-1 leading-relaxed">{pending.text}</p>
+          <p className="text-xs text-[#5B6B78] mt-1.5">
+            {[
+              finding ? `Governing law: ${finding} — provisional system finding` : "Governing law: not yet determined",
+              working ? `Working deadline: ${formatDate(working.iso)} — calculated, not yet confirmed` : "Working deadline: needs attorney review",
+            ].join(" · ")}
+          </p>
+        </div>
+      </div>
+      {cta("Go to Attorney Decision")}
+    </div>
+  );
+}
+
 // ── Attorney decision ────────────────────────────────────────────────────────
 
 function DecisionPanel({
-  record, decision, onChange,
-}: { record?: CaseJurisdiction; decision: AttorneyDecision; onChange: (next: AttorneyDecision) => void }) {
+  record, decision, onChange, highlight,
+}: { record?: CaseJurisdiction; decision: AttorneyDecision; onChange: (next: AttorneyDecision) => void; highlight?: boolean }) {
   const [error, setError] = useState<string | null>(null);
   // Changing the governing law, forums or deadline after approval sends the
   // decision back for sign-off; the change is logged.
@@ -494,7 +522,12 @@ function DecisionPanel({
   const field = "w-full rounded-lg border border-line bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand transition-colors disabled:bg-wash disabled:text-[#5B6B78]";
 
   return (
-    <div className="lg-card p-5 space-y-5">
+    <div
+      id="attorney-decision"
+      tabIndex={-1}
+      aria-label="Attorney decision"
+      className={`lg-card p-5 space-y-5 scroll-mt-[170px] outline-none transition-shadow duration-500 ${highlight ? "ring-2 ring-brand ring-offset-2 ring-offset-wash" : ""}`}
+    >
       <h3 className="section-header">Attorney decision</h3>
 
       {/* Liability summary */}
@@ -654,6 +687,16 @@ export function JurisdictionReviewPage({ caseData, decision: stored, onDecisionC
   const record = jurisdictionForCase(caseRef);
   const decision = stored ?? initialDecision(record);
   const [tab, setTab] = useState<TabId>("forums");
+  // Bring the one Attorney Decision panel into view and mark it briefly.
+  const [highlightDecision, setHighlightDecision] = useState(false);
+  const goToDecision = () => {
+    const el = document.getElementById("attorney-decision");
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+    el.focus({ preventScroll: true });
+    setHighlightDecision(true);
+    window.setTimeout(() => setHighlightDecision(false), 1800);
+  };
 
   const working = workingDeadline(record);
   const flags = [...(record?.flags ?? [])].sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
@@ -711,7 +754,7 @@ export function JurisdictionReviewPage({ caseData, decision: stored, onDecisionC
           <p className="secondary-text mt-1">Where the case can be filed, which law governs it, and the deadline to file — for the attorney to confirm.</p>
         </div>
 
-        <StepTrail status={decision.status} />
+        <DecisionGuidance record={record} decision={decision} onGo={goToDecision} />
 
         {/* Case header + working deadline / decision required */}
         <div className="lg-card p-6 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-6">
@@ -826,7 +869,7 @@ export function JurisdictionReviewPage({ caseData, decision: stored, onDecisionC
             {renderTab()}
           </div>
 
-          <DecisionPanel record={record} decision={decision} onChange={onDecisionChange} />
+          <DecisionPanel record={record} decision={decision} onChange={onDecisionChange} highlight={highlightDecision} />
         </div>
       </div>
     </div>

@@ -222,12 +222,15 @@ export function submitIntakeRequest(
   return submission;
 }
 
-/** The full client-facing URL for a request. */
+/** The full client-facing URL for a request, built from wherever the app is
+ *  served (its origin and configured base path) — never a fixed domain. */
 export function intakeRequestUrl(token: string): string {
-  return `${window.location.origin}/intake-request/${token}`;
+  const base = (import.meta as any).env?.BASE_URL ?? "/";
+  return new URL(`${base.replace(/\/?$/, "/")}intake-request/${token}`, window.location.origin).href;
 }
 
-export const INTAKE_REQUEST_PATH = /^\/intake-request\/([A-Za-z0-9_-]+)\/?$/;
+/** Matches /intake-request/{token}, under any base path. */
+export const INTAKE_REQUEST_PATH = /\/intake-request\/([A-Za-z0-9_-]+)\/?$/;
 
 export const formatShortDate = (iso?: string) =>
   iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "";

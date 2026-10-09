@@ -25,12 +25,13 @@ async function copyText(text: string) {
 }
 
 export function RequestLinkRow({ token, uploads }: { token: string; uploads: number }) {
-  const [copied, setCopied] = useState(false);
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  const copied = state === "copied";
   useEffect(() => {
-    if (!copied) return;
-    const t = window.setTimeout(() => setCopied(false), 2000);
+    if (state === "idle") return;
+    const t = window.setTimeout(() => setState("idle"), state === "copied" ? 2000 : 4000);
     return () => window.clearTimeout(t);
-  }, [copied]);
+  }, [state]);
 
   const url = intakeRequestUrl(token);
   const path = `/intake-request/${token}`;
@@ -49,13 +50,16 @@ export function RequestLinkRow({ token, uploads }: { token: string; uploads: num
         <span className="pill pill-complete shrink-0">{uploads} {uploads === 1 ? "file" : "files"} received</span>
       )}
       <button
-        onClick={async (e) => { e.stopPropagation(); if (await copyText(url)) setCopied(true); }}
+        onClick={async (e) => { e.stopPropagation(); setState((await copyText(url)) ? "copied" : "failed"); }}
+        title={state === "failed" ? "Copying was blocked — select the link and copy it instead" : url}
         className={`flex items-center gap-1.5 px-3.5 py-1.5 border rounded-lg text-sm font-medium transition-all shrink-0 ${
-          copied ? "bg-[#ECFDF3] border-[#D1FADF] text-[#15803D]" : "bg-white border-line text-ink hover:bg-wash"
+          copied ? "bg-[#ECFDF3] border-[#D1FADF] text-[#15803D]"
+            : state === "failed" ? "bg-[#FEF2F2] border-[#FBD5D5] text-[#B91C1C]"
+            : "bg-white border-line text-ink hover:bg-wash"
         }`}
       >
         {copied ? <Check className="w-3.5 h-3.5" strokeWidth={2} /> : <Copy className="w-3.5 h-3.5" strokeWidth={1.75} />}
-        {copied ? "Copied" : "Copy link"}
+        {copied ? "Copied" : state === "failed" ? "Copy failed" : "Copy link"}
       </button>
     </div>
   );

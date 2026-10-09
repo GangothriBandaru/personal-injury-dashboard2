@@ -64,7 +64,7 @@ export const FORUM_ROWS = [
   { key: "damageCaps", label: "Damage caps" },
   { key: "preSuit", label: "Pre-suit requirements" },
   { key: "firmAdmitted", label: "Firm admitted" },
-  { key: "deadline", label: "Deadline (from 3B)" },
+  { key: "deadline", label: "Deadline (from Deadlines tab)" },
 ] as const;
 export type ForumRowKey = (typeof FORUM_ROWS)[number]["key"];
 
@@ -409,4 +409,37 @@ export function initialDecision(record?: CaseJurisdiction): AttorneyDecision {
     status: "open",
     audit: [],
   };
+}
+
+// ── Governing law, as the Case Intelligence Summary states it ────────────────
+
+const US_STATES: Record<string, string> = {
+  AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California", CO: "Colorado", CT: "Connecticut",
+  DE: "Delaware", DC: "District of Columbia", FL: "Florida", GA: "Georgia", HI: "Hawaii", ID: "Idaho", IL: "Illinois",
+  IN: "Indiana", IA: "Iowa", KS: "Kansas", KY: "Kentucky", LA: "Louisiana", ME: "Maine", MD: "Maryland",
+  MA: "Massachusetts", MI: "Michigan", MN: "Minnesota", MS: "Mississippi", MO: "Missouri", MT: "Montana",
+  NE: "Nebraska", NV: "Nevada", NH: "New Hampshire", NJ: "New Jersey", NM: "New Mexico", NY: "New York",
+  NC: "North Carolina", ND: "North Dakota", OH: "Ohio", OK: "Oklahoma", OR: "Oregon", PA: "Pennsylvania",
+  RI: "Rhode Island", SC: "South Carolina", SD: "South Dakota", TN: "Tennessee", TX: "Texas", UT: "Utah",
+  VT: "Vermont", VA: "Virginia", WA: "Washington", WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming",
+};
+
+/** "Cook County, IL" → "Illinois"; undefined when no state can be read. */
+export function stateOfJurisdiction(jurisdiction?: string): string | undefined {
+  const last = jurisdiction?.split(",").pop()?.trim();
+  if (!last) return undefined;
+  if (US_STATES[last.toUpperCase()]) return US_STATES[last.toUpperCase()];
+  return Object.values(US_STATES).find((s) => s.toLowerCase() === last.toLowerCase());
+}
+
+/** What the Governing Law field shows, strongest source first: the law the
+ *  attorney approved; the system's provisional finding; the state of the
+ *  jurisdiction on record. Anything short of approval says it needs review. */
+export function governingLawSummary(caseRef: string | undefined, jurisdiction: string | undefined, approved?: string): { value: string; note?: string } {
+  if (approved) return { value: approved, note: "Approved by the attorney" };
+  const finding = jurisdictionForCase(caseRef)?.governingLaw.finding;
+  if (finding) return { value: finding, note: "Provisional system finding · needs attorney confirmation" };
+  const state = stateOfJurisdiction(jurisdiction);
+  if (state) return { value: state, note: "From the jurisdiction on record · needs attorney review" };
+  return { value: "Needs attorney review" };
 }

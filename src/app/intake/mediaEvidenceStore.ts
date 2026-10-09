@@ -21,7 +21,22 @@ export interface MediaFile {
   name: string;
   size: number;
   type: string;
+  /** Where the original file is kept (mediaFileStore). Absent when the file
+   *  itself was never stored — then it cannot be previewed or downloaded. */
+  storageKey?: string;
+  /** Media analysis, as the analysis step reports it. Absent means it has not
+   *  been run — never assumed to be in progress. */
+  analysisStatus?: "processing" | "complete" | "failed";
+  analysisStartedAt?: string;
+  analysisCompletedAt?: string;
+  /** What the analysis found, in plain words. */
+  analysisResult?: string;
+  /** Why the analysis failed. */
+  analysisError?: string;
 }
+
+/** The analysis fields of a file. */
+export type AnalysisPatch = Pick<MediaFile, "analysisStatus" | "analysisStartedAt" | "analysisCompletedAt" | "analysisResult" | "analysisError">;
 
 /** Who added the media: the attorney, or the client through a request link. */
 export interface MediaOrigin { source: "Attorney" | "Client"; requestId?: string }
@@ -121,4 +136,48 @@ export function addPhotoSetEvidence(
   };
   save({ ...state, sets: [...state.sets, set] });
   return set;
+}
+
+/** Records analysis progress for one video. */
+export function updateVideoAnalysis(videoId: string, patch: AnalysisPatch) {
+  save({ ...state, videos: state.videos.map((v) => (v.id === videoId ? { ...v, file: { ...v.file, ...patch } } : v)) });
+}
+
+/** Records analysis progress for one image of a set. */
+export function updateSetFileAnalysis(setId: string, index: number, patch: AnalysisPatch) {
+  save({
+    ...state,
+    sets: state.sets.map((x) => (x.id === setId ? { ...x, files: x.files.map((f, i) => (i === index ? { ...f, ...patch } : f)) } : x)),
+  });
+}
+
+// ── Status ───────────────────────────────────────────────────────────────────
+
+/** An analysis that has run this long without finishing has stopped — the tab
+ *  running it was closed, or the browser stalled. */
+export const STALLED_AFTER_MS = 2 * 60 * 1000;
+
+export type MediaStatus = "not-analysed" | "processing" | "stalled" | "ready" | "failed" | "partly-ready";
+
+export function fileStatus(f: MediaFile, now = Date.now()): Exclude<MediaStatus, "partly-ready"> {
+  if (f.analysisStatus === "complete") return "ready";
+  if (f.analysisStatus === "failed") return "failed";
+  if (f.analysisStatus === "processing") {
+    const started = f.analysisStartedAt ? Date.parse(f.analysisStartedAt) : now;
+    return now - started > STALLED_AFTER_MS ? "stalled" : "processing";
+  }
+  return "not-analysed";
+}
+
+/** A set's status from its images: processing or stalled while any image is;
+ *  ready when all are; partly ready when some are and the rest failed or were
+ *  never analysed. */
+export function setStatus(files: MediaFile[], now = Date.now()): MediaStatus {
+  const all = files.map((f) => fileStatus(f, now));
+  if (all.includes("processing")) return "processing";
+  if (all.includes("stalled")) return "stalled";
+  if (all.length > 0 && all.every((x) => x === "ready")) return "ready";
+  if (all.includes("ready")) return "partly-ready";
+  if (all.includes("failed")) return "failed";
+  return "not-analysed";
 }

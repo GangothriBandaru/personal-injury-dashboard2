@@ -54,6 +54,7 @@ export function ClientIntakeRequestPage({ token }: { token: string }) {
   const [mediaDraft, setMediaDraft] = useState<ClientMediaDraft>(emptyClientMedia);
   const [mediaFailed, setMediaFailed] = useState(false);
   const [submittedFiles, setSubmittedFiles] = useState(0);
+  const [sending, setSending] = useState(false);
 
   const toggleDictation = () => {
     if (!SpeechRecognitionImpl) return;
@@ -138,12 +139,14 @@ export function ClientIntakeRequestPage({ token }: { token: string }) {
   const fileCount = ready.length + mediaStats.files;
   const canSubmit = fileCount > 0 && confirmed && !uploading && mediaStats.invalid === 0;
   const media = mediaRequest(requestedMedia);
-  const submit = () => {
-    if (!canSubmit) return;
+  const submit = async () => {
+    if (!canSubmit || sending) return;
+    setSending(true);
     // Each video and each set uploads on its own; any that fail stay for retry.
     const sent = mediaStats.files > 0
-      ? uploadClientMedia(mediaDraft, requestedMedia, request.caseId, request.id, request.plaintiff)
+      ? await uploadClientMedia(mediaDraft, requestedMedia, request.caseId, request.id, request.plaintiff)
       : { videoIds: [], setIds: [], remaining: mediaDraft };
+    setSending(false);
     const notSent = clientMediaStats(sent.remaining, requestedMedia).files;
     setSubmittedFiles(fileCount - notSent);
     setMediaDraft(sent.remaining);
@@ -345,7 +348,7 @@ export function ClientIntakeRequestPage({ token }: { token: string }) {
           )}
           <button
             onClick={submit}
-            disabled={!canSubmit}
+            disabled={!canSubmit || sending}
             className="btn btn-primary w-full gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Send className="w-4 h-4" strokeWidth={1.75} />
