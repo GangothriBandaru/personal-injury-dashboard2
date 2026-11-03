@@ -32,6 +32,8 @@ export interface Authority {
 export interface AllocationRule {
   label: string;
   value: string;
+  /** The sidebar's compact wording. */
+  short: string;
   authorityId?: string;
 }
 
@@ -65,12 +67,12 @@ const ILLINOIS: JurisdictionRules = {
     applicable: false,
   },
   allocation: [
-    { label: "Plaintiff fault", value: "Reduces recovery; bars above 50%", authorityId: "il-2-1116" },
-    { label: "Joint and several", value: "Medical expenses: joint · other damages: 25% threshold", authorityId: "il-2-1117" },
-    { label: "Exceptions", value: "May apply — § 2-1118 not verified for this claim", authorityId: "il-2-1118" },
-    { label: "Nonparty allocation", value: "Who counts toward total fault is set by § 2-1117 — not verified", authorityId: "il-2-1117" },
-    { label: "Contribution", value: "Among defendants found liable, under the Contribution Act", authorityId: "il-740-100" },
-    { label: "Settlement credit", value: "Reduces recovery by any good-faith settlement", authorityId: "il-740-100" },
+    { label: "Plaintiff fault", value: "Reduces recovery; bars above 50%", short: "Reduces; bars above 50%", authorityId: "il-2-1116" },
+    { label: "Joint and several", value: "Medical expenses: joint · other damages: 25% threshold", short: "Medical joint · others 25% rule", authorityId: "il-2-1117" },
+    { label: "Exceptions", value: "May apply — § 2-1118 not verified for this claim", short: "May apply · not verified", authorityId: "il-2-1118" },
+    { label: "Nonparty allocation", value: "Who counts toward total fault is set by § 2-1117 — not verified", short: "Set by § 2-1117 · not verified", authorityId: "il-2-1117" },
+    { label: "Contribution", value: "Among defendants found liable, under the Contribution Act", short: "Among liable defendants", authorityId: "il-740-100" },
+    { label: "Settlement credit", value: "Reduces recovery by any good-faith settlement", short: "Good-faith settlements credited", authorityId: "il-740-100" },
   ],
   authorities: [
     {

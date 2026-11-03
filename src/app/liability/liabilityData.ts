@@ -48,6 +48,9 @@ export interface PlaintiffCheck {
   title: string;
   /** What the defense could argue — and what the record shows. */
   description: string;
+  /** The compact card's own title and one-line summary. */
+  cardTitle?: string;
+  summary?: string;
   status: PlaintiffStatus;
   /** Defendant-analysis sources (by id) the check rests on. */
   sourceIds: string[];
@@ -66,6 +69,8 @@ export interface SharedFinding {
   category: string;
   finding: string;
   description: string;
+  cardTitle?: string;
+  summary?: string;
   status: ElementStatus;
   sourceIds: string[];
   authorityId?: string;
@@ -80,6 +85,9 @@ export interface Recommendation {
   title: string;
   /** Why it matters to liability. */
   why: string;
+  /** The recommendation card's own title and reason. */
+  short?: string;
+  shortWhy?: string;
   candidateId?: string;
   /** The elements it would answer, as "candidateId:index". */
   answers: string[];
@@ -148,16 +156,18 @@ export interface CaseLiability {
   recommendations: Recommendation[];
   timelineLinks: Record<string, TimelineLink>;
   /** The window between two timeline events where the alleged breach sits. */
-  causalWindow?: { from: string; to: string; title: string; detail: string };
+  causalWindow?: { from: string; to: string; title: string; detail: string; issue: string };
   scenarios: Scenario[];
   exceptions: FaultException[];
   /** What the client is asked to keep; the attorney records each as confirmed. */
-  preservationChecklist: { id: string; item: string; why: string }[];
+  preservationChecklist: { id: string; item: string; short: string; why: string }[];
   research: { profileQuery: string; webQuery: string };
   /** Recovery sources on record — never fault parties. */
   recoverySources: { name: string; status: string; why: string; next: string }[];
   /** People and entities the record names that the analysis does not treat as defendants. */
   notPursued: { name: string; why: string }[];
+  /** Other Parties: why each surfaced, as the table states it — by candidate id or name. */
+  partyNotes: Record<string, string>;
 }
 
 export const CASE_LIABILITY: CaseLiability[] = [
@@ -172,7 +182,7 @@ export const CASE_LIABILITY: CaseLiability[] = [
       name: "Evelyn Miller",
       checks: [
         {
-          id: "p-capacity", code: "PD1", element: "duty", category: "Capacity / standard of care",
+          id: "p-capacity", code: "PD1", cardTitle: "Standard of care for a resident", summary: "Measured against her capacity, which is not on record.", element: "duty", category: "Capacity / standard of care",
           title: "Standard of care expected of a memory-care resident",
           description: "Any self-care duty is measured against her capacity. She was a resident of a memory care facility; her cognitive capacity is not on record.",
           status: "Not yet known", sourceIds: ["case-record"],
@@ -183,7 +193,7 @@ export const CASE_LIABILITY: CaseLiability[] = [
           ],
         },
         {
-          id: "p-own-safety", code: "PD2", element: "duty", category: "Common-law duty",
+          id: "p-own-safety", code: "PD2", cardTitle: "Reasonable care for own safety", summary: "What it requires depends on her capacity — not on record.", element: "duty", category: "Common-law duty",
           title: "Reasonable care for her own safety",
           description: "Every person must use ordinary care for their own safety. For a memory-care resident, what that requires depends on her capacity, which is not on record.",
           status: "Not yet known", sourceIds: ["case-record"],
@@ -193,7 +203,7 @@ export const CASE_LIABILITY: CaseLiability[] = [
           ],
         },
         {
-          id: "p-conduct", code: "PB1", element: "breach", category: "Plaintiff conduct",
+          id: "p-conduct", code: "PB1", cardTitle: "Her conduct in the stroke response", summary: "No act or omission by her is on record.", element: "breach", category: "Plaintiff conduct",
           title: "Her conduct before or during the stroke response",
           description: "The record attributes no act or omission to her. The jurisdiction review records that no evidence of fault by the plaintiff is on record.",
           status: "Not indicated", sourceIds: ["caregiver-log", "jurisdiction-review"], moduleSource: "Jurisdiction review — fault evidence", authorityId: "il-2-1116",
@@ -203,7 +213,7 @@ export const CASE_LIABILITY: CaseLiability[] = [
           ],
         },
         {
-          id: "p-medication", code: "PB2", element: "breach", category: "Medication adherence",
+          id: "p-medication", code: "PB2", cardTitle: "Took or refused medication", summary: "Who gave each dose, or any refusal, is not on record. Open question.", element: "breach", category: "Medication adherence",
           title: "Whether she took or refused prescribed medication",
           description: "The case alleges negligent medication management by the facility. Who gave each dose — and whether any was refused — is not on record. Open question, not a finding.",
           status: "Not yet known", sourceIds: ["case-record"], open: "Medication administration record for February 2026.",
@@ -213,7 +223,7 @@ export const CASE_LIABILITY: CaseLiability[] = [
           ],
         },
         {
-          id: "p-reporting", code: "PB3", element: "breach", category: "Reporting symptoms",
+          id: "p-reporting", code: "PB3", cardTitle: "Delay in reporting symptoms", summary: "Staff observed the stroke signs; no delay by her is on record.", element: "breach", category: "Reporting symptoms",
           title: "Delay by her in reporting the symptoms",
           description: "The caregiver log shows staff observed the stroke signs themselves. Nothing on record shows a delay on her part in seeking help.",
           status: "Not indicated", sourceIds: ["caregiver-log"],
@@ -222,7 +232,7 @@ export const CASE_LIABILITY: CaseLiability[] = [
           ],
         },
         {
-          id: "p-causation", code: "PC1", element: "causation", category: "Causal link",
+          id: "p-causation", code: "PC1", cardTitle: "Her conduct linked to the injury", summary: "No conduct of hers is on record to link to the stroke.", element: "causation", category: "Causal link",
           title: "Any conduct of hers linked to the injury",
           description: "With no plaintiff conduct on record there is nothing to connect to the stroke or its outcome. Revisit if the medication or staff records raise any.",
           status: "Not indicated", sourceIds: ["jurisdiction-review"], moduleSource: "Jurisdiction review — fault evidence",
@@ -231,7 +241,7 @@ export const CASE_LIABILITY: CaseLiability[] = [
           ],
         },
         {
-          id: "p-concurrency", code: "PC2", element: "causation", category: "Concurrency",
+          id: "p-concurrency", code: "PC2", cardTitle: "Overlap with the escalation delay", summary: "Needs conduct of hers during the staff's delay — none recorded.", element: "causation", category: "Concurrency",
           title: "Conduct of hers overlapping the escalation delay",
           description: "Concurrent fault needs conduct of hers at the same time as the staff's delay. None is recorded.",
           status: "Not indicated", sourceIds: ["caregiver-log", "facility-call-log"],
@@ -240,7 +250,7 @@ export const CASE_LIABILITY: CaseLiability[] = [
           ],
         },
         {
-          id: "p-med-link", code: "PC3", element: "causation", category: "No causal link · PB2",
+          id: "p-med-link", code: "PC3", cardTitle: "Refusal linked to the stroke", summary: "No refused dose, and no link to the stroke, is on record.", element: "causation", category: "No causal link · PB2",
           title: "Medication refusal linked to the stroke",
           description: "If the records ever showed a refused dose, the defense would still need to link it to the stroke or its outcome. Neither is on record.",
           status: "Not yet known", sourceIds: ["case-record"], open: "Medication administration record and an expert opinion.",
@@ -249,7 +259,7 @@ export const CASE_LIABILITY: CaseLiability[] = [
           ],
         },
         {
-          id: "p-preexisting", code: "PM1", element: "damages", category: "Pre-existing condition",
+          id: "p-preexisting", code: "PM1", cardTitle: "Conditions before the stroke", summary: "No pre-incident history on file; no prior condition recorded.", element: "damages", category: "Pre-existing condition",
           title: "Conditions before the stroke",
           description: "The defense may argue the harm stems partly from prior conditions. No pre-incident medical history is on file, and the injury findings record no pre-existing condition.",
           status: "Not yet known", sourceIds: ["case-record"], moduleSource: "Injury Signals — no pre-existing condition recorded",
@@ -260,7 +270,7 @@ export const CASE_LIABILITY: CaseLiability[] = [
           ],
         },
         {
-          id: "p-mitigation", code: "PM2", element: "damages", category: "Mitigation",
+          id: "p-mitigation", code: "PM2", cardTitle: "Followed treatment after the stroke", summary: "Rehabilitation ran Mar 4 – May 20, 2026; no failure to follow treatment.", element: "damages", category: "Mitigation",
           title: "Followed treatment after the stroke",
           description: "Rehabilitation began Mar 4, 2026 and continued to the May 20, 2026 assessment. Nothing on record suggests she failed to follow treatment.",
           status: "No issue on record", sourceIds: ["rehab-records"],
@@ -269,7 +279,7 @@ export const CASE_LIABILITY: CaseLiability[] = [
           ],
         },
         {
-          id: "p-restraint", code: "PM3", element: "damages", category: "Restraint / safety device",
+          id: "p-restraint", code: "PM3", cardTitle: "Not applicable", summary: "Safety-device reductions don't arise in a facility stroke claim.", element: "damages", category: "Restraint / safety device",
           title: "Not applicable",
           description: "Seat-belt, helmet and similar safety-device reductions belong to vehicle and recreation claims. No such issue arises in a facility stroke-response claim.",
           status: "Not applicable", sourceIds: [],
@@ -280,14 +290,16 @@ export const CASE_LIABILITY: CaseLiability[] = [
     sharedFindings: [
       {
         id: "shared-indivisible", kind: "damages", category: "Indivisible injury",
-        finding: "Single stroke, single injury",
+        finding: "Single stroke, single injury", cardTitle: "Single stroke, single injury",
+        summary: "One stroke, one injury; liable defendants may each answer for all of it — not verified.",
         description: "One stroke event caused the injury, so defendants found liable may each answer for the whole harm. How it is shared follows the joint-and-several rule — not verified.",
         status: "Indicated", sourceIds: ["imaging"], authorityId: "il-2-1117",
         missing: "Whether § 2-1118 changes the § 2-1117 rule for this claim is not verified.",
       },
       {
         id: "shared-intervening", kind: "causation", category: "Intervening cause",
-        finding: "No superseding cause identified",
+        finding: "No superseding cause identified", cardTitle: "No superseding cause identified",
+        summary: "No intervening act is on record between the delay and the harm.",
         description: "Nothing in the record identifies an intervening act between the delayed escalation and the harm. Care after hospital arrival is not alleged to be negligent.",
         status: "Not indicated", sourceIds: ["hospital-admission"],
       },
@@ -303,14 +315,16 @@ export const CASE_LIABILITY: CaseLiability[] = [
     },
     recommendations: [
       {
-        id: "r-entity", priority: "High", title: "Entity search — Memory Care Facility LLC and Logistics Co.",
+        id: "r-entity", priority: "High", short: "Entity search — facility and Logistics Co.", shortWhy: "Confirms which entity to name.",
+        title: "Entity search — Memory Care Facility LLC and Logistics Co.",
         why: "Confirms which entity to name. The caption and the Analysis stage name different defendants.",
         candidateId: "memory-care-llc", answers: ["logistics-co:0"],
         custodian: "Illinois Secretary of State", method: "Public record search", preSuit: "Yes",
         draft: { kind: "search", label: "Record search" },
       },
       {
-        id: "r-expert", priority: "High", title: "Medical expert review of the treatment window",
+        id: "r-expert", priority: "High", short: "Expert review of the treatment window", shortWhy: "Causation is not yet known; needs an expert opinion.",
+        title: "Medical expert review of the treatment window",
         why: "Causation is not yet known for the facility or its staff. The MRI confirms the stroke, not the effect of the delay.",
         candidateId: "memory-care-llc", answers: ["memory-care-llc:3", "staff:3"],
         custodian: "Retained neurology expert", method: "Expert retention", preSuit: "Yes",
@@ -318,7 +332,8 @@ export const CASE_LIABILITY: CaseLiability[] = [
         draft: { kind: "expert", label: "Draft expert brief" },
       },
       {
-        id: "r-staffing", priority: "High", title: "Staffing roster, schedule and statements for Feb 7, 2026",
+        id: "r-staffing", priority: "High", short: "Staffing roster and statements, Feb 7", shortWhy: "Shows who decided when to call 911 and who employed them.",
+        title: "Staffing roster, schedule and statements for Feb 7, 2026",
         why: "Shows who decided when to call 911 and who employed them.",
         candidateId: "staff", answers: ["staff:2", "memory-care-llc:2"],
         custodian: "The facility", method: "Records request", preSuit: "Discovery likely",
@@ -326,7 +341,8 @@ export const CASE_LIABILITY: CaseLiability[] = [
         draft: { kind: "records", label: "Draft request" },
       },
       {
-        id: "r-mar", priority: "High", title: "Medication administration record and physician orders, February 2026",
+        id: "r-mar", priority: "High", short: "Medication records and physician orders", shortWhy: "Tests the medication allegation and any refusal argument.",
+        title: "Medication administration record and physician orders, February 2026",
         why: "The only way to test the medication allegation — and any refusal argument against her.",
         candidateId: "medication", answers: ["medication:0", "medication:1"],
         custodian: "The facility; prescriber; pharmacy", method: "Records request (patient records)", preSuit: "Yes",
@@ -334,7 +350,8 @@ export const CASE_LIABILITY: CaseLiability[] = [
         draft: { kind: "records", label: "Draft request" },
       },
       {
-        id: "r-licence", priority: "High", title: "Facility licence and licensing type",
+        id: "r-licence", priority: "High", short: "Facility licence and licensing type", shortWhy: "Decides which Illinois filing rules and claims apply.",
+        title: "Facility licence and licensing type",
         why: "Decides whether the § 2-622 report, the repose period and Nursing Home Care Act claims apply.",
         candidateId: "memory-care-llc", answers: [],
         custodian: "Illinois licensing authority", method: "Public record search", preSuit: "Yes",
@@ -342,7 +359,8 @@ export const CASE_LIABILITY: CaseLiability[] = [
         draft: { kind: "search", label: "Record search" },
       },
       {
-        id: "r-protocol", priority: "Medium", title: "Stroke and emergency escalation protocols in force Feb 7, 2026",
+        id: "r-protocol", priority: "Medium", short: "Stroke escalation protocols, Feb 7", shortWhy: "Shows whether the delay also breached the facility's own protocol.",
+        title: "Stroke and emergency escalation protocols in force Feb 7, 2026",
         why: "Shows whether the delay also breached the facility's own protocol.",
         candidateId: "memory-care-llc", answers: [],
         custodian: "The facility", method: "Records request", preSuit: "Discovery likely",
@@ -350,7 +368,8 @@ export const CASE_LIABILITY: CaseLiability[] = [
         draft: { kind: "records", label: "Draft request" },
       },
       {
-        id: "r-agreement", priority: "Medium", title: "Residency or admission agreement",
+        id: "r-agreement", priority: "Medium", short: "Residency or admission agreement", shortWhy: "Documents the duty the facility undertook — currently indicated, not shown.",
+        title: "Residency or admission agreement",
         why: "Documents the duty the facility undertook — currently indicated, not shown.",
         candidateId: "memory-care-llc", answers: ["memory-care-llc:0"],
         custodian: "The facility; the family", method: "Client or records request", preSuit: "Yes",
@@ -358,7 +377,8 @@ export const CASE_LIABILITY: CaseLiability[] = [
         draft: { kind: "records", label: "Draft request" },
       },
       {
-        id: "r-ownership", priority: "Medium", title: "Facility ownership and management records",
+        id: "r-ownership", priority: "Medium", short: "Facility ownership and management records", shortWhy: "Tests whether Logistics Co. has any connection to the facility or her care.",
+        title: "Facility ownership and management records",
         why: "Tests whether Logistics Co. has any connection to the facility or her care.",
         candidateId: "logistics-co", answers: ["logistics-co:0", "logistics-co:1"],
         custodian: "The facility; licensing authority", method: "Records request", preSuit: "Not assessed",
@@ -378,6 +398,7 @@ export const CASE_LIABILITY: CaseLiability[] = [
     causalWindow: {
       from: "stroke-symptoms", to: "911-delay",
       title: "Escalation window",
+      issue: "The 911 response delay",
       detail: "About 145 minutes between the documented stroke signs and the 911 call — the delay the breach findings rest on. Exact times are not on record.",
     },
     scenarios: [
@@ -428,11 +449,11 @@ export const CASE_LIABILITY: CaseLiability[] = [
       { name: "Sudden emergency", detail: "No defense reliance on a sudden emergency is on record.", status: "N/A" },
     ],
     preservationChecklist: [
-      { id: "pc-meds", item: "Medication bottles and packaging", why: "Can show what was dispensed if the medication allegation is pursued." },
-      { id: "pc-belongings", item: "Personal belongings returned by the facility", why: "May include care notes or medication." },
-      { id: "pc-comms", item: "Texts, emails and voicemails with the facility", why: "Can fix when the family was told, and what." },
-      { id: "pc-photos", item: "Family photos and videos of her condition", why: "Before-and-after evidence of the harm." },
-      { id: "pc-social", item: "Social media hold", why: "Posts about her care or condition must not be deleted." },
+      { id: "pc-meds", short: "Medication bottles", item: "Medication bottles and packaging", why: "Can show what was dispensed if the medication allegation is pursued." },
+      { id: "pc-belongings", short: "Belongings", item: "Personal belongings returned by the facility", why: "May include care notes or medication." },
+      { id: "pc-comms", short: "Messages", item: "Texts, emails and voicemails with the facility", why: "Can fix when the family was told, and what." },
+      { id: "pc-photos", short: "Family photos", item: "Family photos and videos of her condition", why: "Before-and-after evidence of the harm." },
+      { id: "pc-social", short: "Social media hold", item: "Social media hold", why: "Posts about her care or condition must not be deleted." },
     ],
     research: {
       profileQuery: "Medical malpractice · IL · delayed stroke escalation · memory care",
@@ -446,6 +467,13 @@ export const CASE_LIABILITY: CaseLiability[] = [
         next: "To Damages module",
       },
     ],
+    partyNotes: {
+      staff: "Observed stroke signs; escalation was delayed.",
+      "logistics-co": "Named in caption; connection to the facility unconfirmed.",
+      medication: "Medication negligence alleged; records not on file.",
+      "ABC Professional Liability Insurance": "Potential recovery source; not a fault party.",
+      "Cook County Medical Center": "Treating provider; no current basis to treat as a defendant.",
+    },
     notPursued: [
       { name: "Cook County Medical Center", why: "Treating hospital. The Defendant Analysis does not treat treating providers as defendants; nothing on record points to fault." },
     ],

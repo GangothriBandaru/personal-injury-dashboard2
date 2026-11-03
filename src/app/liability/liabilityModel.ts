@@ -47,6 +47,9 @@ export interface DefendantFinding {
   category: string;
   title: string;
   description?: string;
+  /** The compact card's title and one-line summary. */
+  cardTitle: string;
+  summary?: string;
   status: ElementStatus;
   /** Status under the scenario being tested, when it differs. */
   scenarioStatus?: ElementStatus;
@@ -204,6 +207,7 @@ export function buildLiabilityModel(m: ModelInput) {
           id, kind: e.kind!, candidate: c,
           category: e.category ?? ELEMENTS.find((x) => x.key === e.kind)!.label,
           title: e.finding ?? e.name, description: e.description,
+          cardTitle: e.cardTitle ?? e.finding ?? e.name, summary: e.summary ?? e.description,
           status: e.status, scenarioStatus: sc && sc !== e.status ? sc : undefined,
           note: e.cite?.note, missing: e.missing, authorityId: e.authorityId,
           evidence: e.cite ? refsFor([e.cite.sourceId]) : [],
@@ -211,6 +215,7 @@ export function buildLiabilityModel(m: ModelInput) {
       }),
     ...m.liability.sharedFindings.map((s): Raw => ({
       id: s.id, kind: s.kind, candidate: lead, shared: true, category: s.category, title: s.finding, description: s.description,
+      cardTitle: s.cardTitle ?? s.finding, summary: s.summary ?? s.description,
       status: s.status, missing: s.missing, authorityId: s.authorityId, evidence: refsFor(s.sourceIds),
     })),
   ];
@@ -260,6 +265,8 @@ export function buildLiabilityModel(m: ModelInput) {
         id: "r-cited-files",
         priority: "Urgent",
         title: `Bring the ${citedOffFile.length} cited facility and emergency records into the case file`,
+        short: `Obtain ${citedOffFile.length} cited facility and dispatch records`,
+        shortWhy: "Shown findings rely on records not yet in the case file.",
         why: `Findings marked Shown rest on ${citedOffFile.map((e) => e.file).join(", ")} — cited by the Defendant Analysis but not in this case's documents.`,
         answers: defendantFindings.filter((f) => f.status === "Shown" && f.evidence.some((e) => !e.onFile)).map((f) => f.id),
         custodian: "The facility; emergency dispatch",
@@ -658,13 +665,12 @@ export function buildLiabilityModel(m: ModelInput) {
 
   // ── Reading the timeline: a summary built from the record, not written ──
   const breachLinked = new Set(timeline.flatMap((t) => t.findings.filter((f) => f.kind === "breach").map((f) => f.id)));
+  const words = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine"];
+  const count = words[breachLinked.size] ?? String(breachLinked.size);
   const reading = [
-    `${breachLinked.size} recorded ${breachLinked.size === 1 ? "breach links" : "breaches link"} to the timeline`,
-    win ? `the ${win.title.toLowerCase()} between the documented signs and the 911 call is the central causal issue` : null,
-    causationOpen.length ? `whether it worsened the outcome is not yet known (${causationOpen.length} causation ${causationOpen.length === 1 ? "element" : "elements"} need an expert)` : null,
-    plaintiffFindings.some((p) => p.element === "breach" && p.status !== "Not indicated" && p.status !== "Not applicable") ? null : "no conduct of the plaintiff is recorded in that window",
-    datesDiffer ? `the incident date is disputed (${fmtIso(anchor)} in the evidence vs. ${fmtIso(recorded)} on the record)` : null,
-  ].filter(Boolean).join("; ") + ".";
+    `${count} recorded ${breachLinked.size === 1 ? "breach links" : "breaches link"} to the timeline.`,
+    win ? `${win.issue} is the central causal issue; ${causationOpen.length ? "its effect on the outcome remains unconfirmed" : "its effect on the outcome is supported"}.` : null,
+  ].filter(Boolean).join(" ");
 
   return {
     defendantFindings, plaintiffFindings, parties, inAnalysis, groups, completeness, recommendations, ledger, timeline, flags,
