@@ -1003,7 +1003,7 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
         </h1>
 
         {/* ── Case Intelligence Summary (≈35%) beside Analysis Findings (≈65%) ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-[40fr_60fr] xl:grid-cols-[35fr_65fr] gap-5 items-start">
+        <div className="grid grid-cols-1 lg:grid-cols-[40fr_60fr] xl:grid-cols-[35fr_65fr] gap-5 items-start lg:items-stretch">
 
           {/* Case Intelligence Summary, compact card grid */}
           <div id="case-intelligence" className="lg-card px-6 py-5 flex flex-col min-w-0 scroll-mt-[150px]">
@@ -1012,7 +1012,7 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
               <span className="pill pill-complete">92% Complete</span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
               {summaryRows.map(({ icon: Icon, label, value, note, onClick, hint }) => {
                 const body = (
                   <>
@@ -1079,7 +1079,7 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
             {/* Primary CTA pinned full-width at the bottom */}
             <Button
               onClick={onProceedToValuation}
-              className="btn btn-primary gap-2 w-full mt-4"
+              className="btn btn-primary gap-2 w-full mt-auto"
             >
               Proceed To Valuation
               <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
@@ -1087,12 +1087,12 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
           </div>
 
           {/* ── Analysis findings — the six deliverable cards ── */}
-        <div id="analysis-deliverables" className="lg-card overflow-hidden min-w-0 scroll-mt-[150px]">
+        <div id="analysis-deliverables" className="lg-card overflow-hidden min-w-0 flex flex-col scroll-mt-[150px]">
           <div className="flex items-center justify-between px-6 py-4 border-b border-line">
             <h2 className="section-header">Analysis Findings</h2>
             <span className="secondary-text">{analysisCards.length} analyses</span>
           </div>
-          <div className="p-6 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+          <div className="p-6 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 flex-1 lg:auto-rows-fr">
             {analysisCards.map((item) => (
               <div
                 key={item.title}
