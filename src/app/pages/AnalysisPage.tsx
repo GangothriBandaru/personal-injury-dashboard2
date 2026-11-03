@@ -1002,17 +1002,17 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
           <span className="text-[#5B6B78]">Stage 2 -</span> <span className="text-ink">Analysis</span>
         </h1>
 
-        {/* ── Case Intelligence — the timeline now has its own page ── */}
-        <div className="grid grid-cols-1 gap-6 items-start">
+        {/* ── Case Intelligence Summary (≈35%) beside Analysis Findings (≈65%) ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-[40fr_60fr] xl:grid-cols-[35fr_65fr] gap-5 items-start">
 
           {/* Case Intelligence Summary, compact card grid */}
-          <div id="case-intelligence" className="lg-card px-6 py-5 flex flex-col scroll-mt-[150px]">
+          <div id="case-intelligence" className="lg-card px-6 py-5 flex flex-col min-w-0 scroll-mt-[150px]">
             <div className="flex items-center gap-2.5 mb-4">
               <h2 className="section-header">Case Intelligence Summary</h2>
               <span className="pill pill-complete">92% Complete</span>
             </div>
 
-            <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {summaryRows.map(({ icon: Icon, label, value, note, onClick, hint }) => {
                 const body = (
                   <>
@@ -1086,21 +1086,13 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
             </Button>
           </div>
 
-        </div>
-
-        {/* ── Analysis Summary + Signals (20 / 80) ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-[80fr_20fr] gap-6 items-start">
-
-        {/* LEFT (80%) — Signals + Evidence Verification (the tall, scrolling column) */}
-        <div className="space-y-8 min-w-0 lg:order-1">
-
-        {/* ── Analysis findings — five deliverable cards, as in Case Ready ── */}
-        <div id="analysis-deliverables" className="lg-card overflow-hidden scroll-mt-[150px]">
+          {/* ── Analysis findings — the six deliverable cards ── */}
+        <div id="analysis-deliverables" className="lg-card overflow-hidden min-w-0 scroll-mt-[150px]">
           <div className="flex items-center justify-between px-6 py-4 border-b border-line">
             <h2 className="section-header">Analysis Findings</h2>
             <span className="secondary-text">{analysisCards.length} analyses</span>
           </div>
-          <div className="p-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          <div className="p-6 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
             {analysisCards.map((item) => (
               <div
                 key={item.title}
@@ -1134,6 +1126,14 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
             ))}
           </div>
         </div>
+
+        </div>
+
+        {/* ── Evidence Verification + Analysis Complete (80 / 20) ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-[80fr_20fr] gap-6 items-start">
+
+        {/* LEFT (80%) — Evidence Verification */}
+        <div className="space-y-8 min-w-0 lg:order-1">
 
         {/* ── Evidence Verification ── */}
         <div id="evidence-verification" className="lg-card !p-0 overflow-hidden scroll-mt-[150px]">
