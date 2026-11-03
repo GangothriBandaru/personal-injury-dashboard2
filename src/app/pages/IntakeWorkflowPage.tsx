@@ -1837,7 +1837,7 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onDoc
           {/* ── Workspace tab bar ── */}
           <div id="workspace-tabs" className="lg-card p-1.5 flex items-center gap-1.5 scroll-mt-[150px]">
             {([
-              { key: "request" as const, label: "Documents Request" },
+              { key: "request" as const, label: "Intake Request" },
               { key: "documents" as const, label: "Documents" },
             ]).map((tab) => (
               <button

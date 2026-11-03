@@ -6,6 +6,7 @@ import {
   ArrowRight, Flag, Circle, Shield, Users
 } from "lucide-react";
 import { DELIVERABLES, type DeliverableKind } from "./DeliverablePage";
+import { ANALYSIS_FINDINGS, useAnalysisFindingCounts, type AnalysisDetail } from "./AnalysisPage";
 import { defendantsForCase } from "../defendants/defendantData";
 import { useDefendantDecisions } from "../defendants/defendantDecisionStore";
 import { INSURANCE_ANALYSIS } from "../insurance/insuranceData";
@@ -34,6 +35,8 @@ interface CaseReadyPageProps {
   onOpenDeliverable?: (kind: DeliverableKind) => void;
   /** Opens the Defendant Analysis — the same page Analysis opens. */
   onOpenDefendants?: () => void;
+  /** Opens one of the Analysis findings sets — the same pages Analysis opens. */
+  onOpenAnalysisDetail?: (detail: AnalysisDetail) => void;
   /** Section to bring into view on arrival — used when returning from a sub-page. */
   scrollToSection?: string;
 }
@@ -51,7 +54,7 @@ const CHECKLIST_DETAILS: Record<string, string> = {
 // The four deliverables — the same list their dedicated pages are built from.
 const deliverables = DELIVERABLES.map((d) => ({ ...d, color: "bg-tint text-deep" }));
 
-export function CaseReadyPage({ caseData, pipeline, onStageClick, onBackToIntake, onOpenWorkspace, onOpenInsurance, onOpenDeliverable, onOpenDefendants, scrollToSection }: CaseReadyPageProps) {
+export function CaseReadyPage({ caseData, pipeline, onStageClick, onBackToIntake, onOpenWorkspace, onOpenInsurance, onOpenDeliverable, onOpenDefendants, onOpenAnalysisDetail, scrollToSection }: CaseReadyPageProps) {
   const defendants = defendantsForCase(caseData?.caseId ?? "PI-2024-001");
   const defendantDecisions = useDefendantDecisions(defendants?.id);
   // Returning from a sub-page lands back on the deliverable it was opened from.
@@ -65,6 +68,9 @@ export function CaseReadyPage({ caseData, pipeline, onStageClick, onBackToIntake
   // Derive checklist from pipeline state
   const categories = pipeline ? classifyDocuments(pipeline.documents) : [];
   const findings = pipeline ? generateAnalysisFindings(categories) : [];
+  // The Analysis findings sets, counted as the Analysis stage counts them.
+  const findingCounts = useAnalysisFindingCounts(caseData?.caseId ?? "PI-2024-001", pipeline?.documents ?? []);
+  const analysisFindings = (Object.keys(ANALYSIS_FINDINGS) as AnalysisDetail[]).map((kind) => ({ kind, ...ANALYSIS_FINDINGS[kind], count: findingCounts[kind] }));
   const checklistMap = pipeline ? computeChecklist(pipeline, categories, findings) : {};
   const checklistItems = Object.entries(checklistMap).map(([label]) => ({
     id: label.replace(/\s+/g, "-").toLowerCase(),
@@ -251,8 +257,8 @@ export function CaseReadyPage({ caseData, pipeline, onStageClick, onBackToIntake
           <div id="generated-deliverables" className="lg-card overflow-hidden scroll-mt-[150px]">
             <div className="flex items-center justify-between px-6 py-4 border-b border-line">
               <h2 className="section-header">Generated Deliverables</h2>
-              {/* Counted: the deliverables, Insurance and Defendant Analysis. */}
-              <span className="secondary-text">{DELIVERABLES.length + 2} documents ready</span>
+              {/* Counted: the deliverables, Insurance, Defendant Analysis and the Analysis findings sets. */}
+              <span className="secondary-text">{DELIVERABLES.length + 2 + analysisFindings.length} documents ready</span>
             </div>
 
             <div className="p-6 grid grid-cols-2 gap-4">
@@ -341,6 +347,37 @@ export function CaseReadyPage({ caseData, pipeline, onStageClick, onBackToIntake
                   </button>
                 </div>
               </div>
+
+              {/* The Analysis findings sets — the same pages Analysis opens. */}
+              {analysisFindings.map((item) => (
+                <div
+                  key={item.kind}
+                  id={`analysis-${item.kind}-deliverable`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => onOpenAnalysisDetail?.(item.kind)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenAnalysisDetail?.(item.kind); } }}
+                  className="lg-card lg-card-i p-4 flex flex-col cursor-pointer scroll-mt-[150px]"
+                >
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-tint text-deep">
+                      <item.icon className="w-3.5 h-3.5" strokeWidth={1.75} />
+                      {item.category}
+                    </div>
+                  </div>
+                  <h3 className="card-title mb-1">{item.title}</h3>
+                  <p className="secondary-text leading-relaxed flex-1">{item.description}</p>
+                  <div className="flex items-center justify-between mt-4 pt-3 border-t border-line">
+                    <span className="mono-ref">{item.count} {item.count === 1 ? item.unit : `${item.unit}s`}</span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onOpenAnalysisDetail?.(item.kind); }}
+                      className="flex items-center gap-1 text-xs font-medium text-deep hover:text-ink transition-colors"
+                    >
+                      Open <ExternalLink className="w-3.5 h-3.5" strokeWidth={1.75} />
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
           </div>

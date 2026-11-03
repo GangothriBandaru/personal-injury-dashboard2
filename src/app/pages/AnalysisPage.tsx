@@ -58,6 +58,9 @@ interface AnalysisPageProps {
   onOpenDetail?: (detail: AnalysisDetail) => void;
   /** From a findings page, back to the stage overview. */
   onBackToAnalysis?: () => void;
+  /** A findings page's back link and breadcrumb stage, when opened from another stage. */
+  backLabel?: string;
+  stageLabel?: string;
   /** Opens the Medical Chronology. */
   onOpenChronology?: () => void;
   /** Changes the case documents (edit, delete) from their latest value. */
@@ -65,6 +68,14 @@ interface AnalysisPageProps {
 }
 
 export type AnalysisDetail = "liability" | "injury" | "violations" | "timeline";
+
+/** The four findings sets — the cards Analysis and Case Ready both show. */
+export const ANALYSIS_FINDINGS: Record<AnalysisDetail, { title: string; category: string; icon: any; description: string; unit: string }> = {
+  liability: { title: "Liability Signals", category: "Liability", icon: Scale, unit: "finding", description: "Key findings identifying potential liability and the evidence supporting each finding." },
+  injury: { title: "Injury Signals", category: "Medical", icon: Stethoscope, unit: "finding", description: "Key injury findings, medical evidence, and documented impacts relevant to the case." },
+  violations: { title: "Violation Analysis", category: "Analysis", icon: Gavel, unit: "violation", description: "Identified violations, supporting evidence, and their relevance to potential liability." },
+  timeline: { title: "Case Timeline Overview", category: "Timeline", icon: CalendarDays, unit: "key event", description: "Key events extracted from the case timeline, with supporting evidence for each event." },
+};
 
 // Case narrative — incident → treatment → injury → damages → case ready
 interface TimelineEvent {
@@ -358,7 +369,25 @@ function EventFormModal({
   );
 }
 
-export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToIntake, onProceedToValuation, onOpenInsurance, onOpenJurisdiction, onOpenDefendants, governingLaw, scrollToSection, detail, onOpenDetail, onBackToAnalysis, onOpenChronology, onDocumentsUpdate }: AnalysisPageProps) {
+/** Each findings set's count, read from the same records its page shows. */
+export function useAnalysisFindingCounts(caseId: string, documents: CaseDocument[]): Record<AnalysisDetail, number> {
+  const timeline = useCaseTimeline(caseId);
+  const signals = generateAnalysisFindings(classifyDocuments(documents));
+  // With a liability analysis on record, Liability Signals opens that workspace,
+  // so it counts its findings: the defendant elements and plaintiff checks.
+  const record = liabilityForCase(caseId);
+  const defendants = record ? defendantsForCase(caseId) : undefined;
+  return {
+    liability: record && defendants
+      ? defendants.candidates.reduce((n, c) => n + c.elements.filter((e) => e.kind).length, 0) + record.plaintiff.checks.length + record.sharedFindings.length
+      : signals.filter((s) => s.kind === "liability").length,
+    injury: signals.filter((s) => s.kind === "injury").length,
+    violations: VIOLATION_CARDS.length,
+    timeline: timelineEvents.filter((ev) => !timeline.removed[ev.id]).length + timeline.manual.length,
+  };
+}
+
+export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToIntake, onProceedToValuation, onOpenInsurance, onOpenJurisdiction, onOpenDefendants, governingLaw, scrollToSection, detail, onOpenDetail, onBackToAnalysis, backLabel = "Back to Analysis", stageLabel = "Analysis", onOpenChronology, onDocumentsUpdate }: AnalysisPageProps) {
   // Returning from a sub-page lands back on the section it was opened from.
   useEffect(() => {
     if (!scrollToSection) return;
@@ -409,15 +438,11 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
 
   const liabilitySignals = signals.filter((s) => s.kind === "liability");
   const injurySignals = signals.filter((s) => s.kind === "injury");
-  // With a liability analysis on record, Liability Signals opens that workspace,
-  // so the card counts its findings: the defendant elements and plaintiff checks.
   const liabilityRecord = liabilityForCase(caseData?.caseId ?? "PI-2024-001");
-  const liabilityDefendants = liabilityRecord ? defendantsForCase(caseData?.caseId ?? "PI-2024-001") : undefined;
-  const liabilityCount = liabilityRecord && liabilityDefendants
-    ? liabilityDefendants.candidates.reduce((n, c) => n + c.elements.filter((e) => e.kind).length, 0) + liabilityRecord.plaintiff.checks.length + liabilityRecord.sharedFindings.length
-    : liabilitySignals.length;
-  const injuryCount = injurySignals.length;
-  const violationCount = VIOLATION_CARDS.length;
+  const findingCounts = useAnalysisFindingCounts(caseData?.caseId ?? "PI-2024-001", documents);
+  const liabilityCount = findingCounts.liability;
+  const injuryCount = findingCounts.injury;
+  const violationCount = findingCounts.violations;
   const verifiedCount = verifiedDocuments.length || 12;
 
   const defaultCaseData = {
@@ -674,10 +699,10 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
   ];
 
   const DETAIL_META: Record<AnalysisDetail, { title: string; category: string; icon: any; count: number; description: string }> = {
-    liability: { title: "Liability Signals", category: "Liability", icon: Scale, count: liabilityCount, description: "Key findings identifying potential liability and the evidence supporting each finding." },
-    injury: { title: "Injury Signals", category: "Medical", icon: Stethoscope, count: injuryCount, description: "Key injury findings, medical evidence, and documented impacts relevant to the case." },
-    violations: { title: "Violation Analysis", category: "Analysis", icon: Gavel, count: violationCount, description: "Identified violations, supporting evidence, and their relevance to potential liability." },
-    timeline: { title: "Case Timeline Overview", category: "Timeline", icon: CalendarDays, count: events.length, description: "Key events extracted from the case timeline, with supporting evidence for each event." },
+    liability: { ...ANALYSIS_FINDINGS.liability, count: liabilityCount },
+    injury: { ...ANALYSIS_FINDINGS.injury, count: injuryCount },
+    violations: { ...ANALYSIS_FINDINGS.violations, count: violationCount },
+    timeline: { ...ANALYSIS_FINDINGS.timeline, count: events.length },
   };
   // One findings set on its own page: the same cards, evidence and Preview /
   // Insights the stage showed in its tabs, every finding at once.
@@ -949,13 +974,13 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
               className="flex items-center gap-2 secondary-text hover:text-ink transition-colors"
             >
               <ChevronLeft className="w-4 h-4" strokeWidth={1.75} />
-              {detail ? "Back to Analysis" : "Back to Case Intake"}
+              {detail ? backLabel : "Back to Case Intake"}
             </button>
             {detail ? (
               <div className="secondary-text ml-auto flex items-center gap-2 min-w-0">
                 <span className="truncate">{data.caseName}</span>
                 <ChevronRight className="w-3.5 h-3.5 text-[#9BA8B4] shrink-0" strokeWidth={1.75} />
-                <span className="shrink-0">Analysis</span>
+                <span className="shrink-0">{stageLabel}</span>
                 <ChevronRight className="w-3.5 h-3.5 text-[#9BA8B4] shrink-0" strokeWidth={1.75} />
                 <span className="text-ink font-medium shrink-0">{DETAIL_META[detail].title}</span>
               </div>

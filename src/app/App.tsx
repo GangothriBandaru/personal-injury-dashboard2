@@ -136,9 +136,14 @@ export default function App() {
     setReturnToSection("generated-deliverables");
     setActivePage("case-ready");
   };
-  const openAnalysisDetail = (d: AnalysisDetail) => {
+  // The findings pages are shared by Analysis and Case Ready; this is the stage
+  // a findings page was opened from, and the one its back link returns to.
+  const [analysisDetailOrigin, setAnalysisDetailOrigin] = useState<"analysis" | "case-ready">("analysis");
+  const openAnalysisDetail = (d: AnalysisDetail, origin: "analysis" | "case-ready" = "analysis") => {
     setAnalysisDetail(d);
+    setAnalysisDetailOrigin(origin);
     setActivePage("analysis-detail");
+    document.querySelector("main")?.scrollTo(0, 0);
   };
   const backToAnalysis = () => {
     setReturnToSection("analysis-deliverables");
@@ -146,7 +151,7 @@ export default function App() {
   };
   // Browser Back from an Analysis sub-page returns to Analysis: entering one
   // adds a history entry; leaving it in the app takes that entry back off.
-  const onAnalysisSubpage = activePage === "analysis-detail" || (activePage === "deliverable" && deliverableOrigin === "analysis");
+  const onAnalysisSubpage = (activePage === "analysis-detail" && analysisDetailOrigin === "analysis") || (activePage === "deliverable" && deliverableOrigin === "analysis");
   const subpageEntry = useRef(false);
   const backToAnalysisRef = useRef(backToAnalysis);
   backToAnalysisRef.current = backToAnalysis;
@@ -298,8 +303,10 @@ export default function App() {
             onOpenDefendants={(name) => openDefendantsFrom("analysis-detail", name)}
             governingLaw={jurisdictionDecision?.status === "approved" ? jurisdictionDecision.governingLaw : undefined}
             detail={analysisDetail}
-            onBackToAnalysis={backToAnalysis}
-            onOpenDetail={openAnalysisDetail}
+            onBackToAnalysis={analysisDetailOrigin === "case-ready" ? () => { setReturnToSection(`analysis-${analysisDetail}-deliverable`); setActivePage("case-ready"); } : backToAnalysis}
+            backLabel={analysisDetailOrigin === "case-ready" ? "Back to Case Ready" : "Back to Analysis"}
+            stageLabel={analysisDetailOrigin === "case-ready" ? "Case Ready" : "Analysis"}
+            onOpenDetail={(d) => openAnalysisDetail(d)}
             onDocumentsUpdate={(fn) => setPipeline((prev) => ({ ...prev, documents: fn(prev.documents) }))}
             onOpenChronology={() => openDeliverable("chronology", "analysis")}
           />
@@ -374,6 +381,7 @@ export default function App() {
             onOpenInsurance={() => openInsuranceFrom("case-ready")}
             onOpenDeliverable={openDeliverable}
             onOpenDefendants={() => openDefendantsFrom("case-ready")}
+            onOpenAnalysisDetail={(d) => openAnalysisDetail(d, "case-ready")}
             scrollToSection={returnToSection}
           />
         );
